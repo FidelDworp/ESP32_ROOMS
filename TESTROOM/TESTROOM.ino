@@ -3,7 +3,7 @@
 // Bereikbaar op http://testroom.local of http://192.168.1.36 => Andere controller: Naam (sectie DNS/MDNS) + static IP aanpassen!
 // Recht: Met Grok:
 // 20dec25 22:30  Bed-switch & C° persistent gemaakt!
-// 21dec25 10:30 Volgende NVS settings projectjes: Optionele sensors verbergen in UI, uitgeschakeld in Matter)
+// 21dec25 10:30 Deel van de Optionele sensors verborgen in UI, Volgende NVS settings projectjes: Rest van OP sensors verbergen in UI, uitgeschakeld in Matter)
 
 
 
