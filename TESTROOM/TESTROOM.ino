@@ -1,8 +1,9 @@
 // ESP32_TESTROOM_Grok.ino = Transition from Photon based to ESP32 based Home automation system
 // Developed together with ChatGPT in december '25.
 // Bereikbaar op http://testroom.local of http://192.168.1.36 => Andere controller: Naam (sectie DNS/MDNS) + static IP aanpassen!
-// Recht: Met Grok: 
-// 20dec25 22:30 Volgende NVS settings projectjes: Optionele sensors verbergen in UI, uitgeschakeld in Matter)
+// Recht: Met Grok:
+// 20dec25 22:30  Bed-switch & C° persistent gemaakt!
+// 21dec25 10:30 Volgende NVS settings projectjes: Optionele sensors verbergen in UI, uitgeschakeld in Matter)
 
 
 
@@ -711,14 +712,14 @@ void setup() {
     <tr><td class="label">Dauwpunt</td><td class="value">)rawliteral" + String(dew, 1) + " °C" + R"rawliteral(</td><td class="control"></td></tr>
     <tr><td class="label">DewAlert</td><td class="value">)rawliteral" + String(dew_alert ? "JA" : "NEE") + R"rawliteral(</td><td class="control"></td></tr>
     <tr><td class="label">CO₂ ppm</td><td class="value">)rawliteral" + String(co2) + " ppm" + R"rawliteral(</td><td class="control"></td></tr>
-    <tr><td class="label">Stof (Dust)</td><td class="value">)rawliteral" + String(dust) + R"rawliteral(</td><td class="control"></td></tr>
+    <tr><td class="label">Stof</td><td class="value">)rawliteral" + String(dust) + R"rawliteral(</td><td class="control"></td></tr>
 
     <tr><td class="label">Heating setpoint</td><td class="value">)rawliteral" + String(heating_setpoint) + " °C" + R"rawliteral(</td>
       <td class="control"><form action="/set_setpoint" method="get" onsubmit="event.preventDefault(); submitAjax(this);"><input type="range" class="slider" name="setpoint" min="10" max="30" value=")rawliteral" + String(heating_setpoint) + R"rawliteral(" onchange="submitAjax(this.form);"></form></td></tr>
     <tr><td class="label">Heating Auto</td><td class="value">)rawliteral" + String(heating_mode == 0 ? "AUTO" : "MANUEEL") + R"rawliteral(</td>
       <td class="control"><form action="/toggle_heating_auto" method="get" onsubmit="event.preventDefault(); submitAjax(this);"><label class="switch"><input type="checkbox" )rawliteral" + (heating_mode == 0 ? "checked" : "") + R"rawliteral( onchange="submitAjax(this.form);"><span class="slider-switch"></span></label></form></td></tr>
 
-    <tr><td class="label">Ventilatie %</td><td class="value">)rawliteral" + String(vent_percent) + " %" + R"rawliteral(</td>
+    <tr><td class="label">Ventilatie snelheid %</td><td class="value">)rawliteral" + String(vent_percent) + " %" + R"rawliteral(</td>
       <td class="control"><form action="/set_vent" method="get" onsubmit="event.preventDefault(); submitAjax(this);"><input type="range" class="slider" name="vent" min="0" max="100" value=")rawliteral" + String(vent_percent) + R"rawliteral(" onchange="submitAjax(this.form);"></form></td></tr>
     <tr><td class="label">Vent Auto</td><td class="value">)rawliteral" + String(vent_mode == 0 ? "AUTO" : "MANUEEL") + R"rawliteral(</td>
       <td class="control"><form action="/toggle_vent_auto" method="get" onsubmit="event.preventDefault(); submitAjax(this);"><label class="switch"><input type="checkbox" )rawliteral" + (vent_mode == 0 ? "checked" : "") + R"rawliteral( onchange="submitAjax(this.form);"><span class="slider-switch"></span></label></form></td></tr>
@@ -728,19 +729,26 @@ void setup() {
        <label class="switch"><input type="checkbox" )rawliteral" + (home_mode ? "checked" : "") + R"rawliteral( onchange="submitAjax(this.form);">
        <span class="slider-switch"></span></label>
     </form></td></tr>
-
+    <tr><td class="label">Hardware thermostaat</td><td class="value">)rawliteral" + String(tstat_on ? "AAN" : "UIT") + R"rawliteral(</td><td class="control"></td></tr>
     <tr><td class="label">Heating aan</td><td class="value">)rawliteral" + String(heating_on ? "JA" : "NEE") + R"rawliteral(</td><td class="control"></td></tr>
   </table>
 
 
-
   <div class="group-title">VERLICHTING</div>
   <table>
-    <tr><td class="label">Zonlicht (TSL2561)</td><td class="value">)rawliteral" + String(sun_light) + " lux" + R"rawliteral(</td><td class="control"></td></tr>
+    <tr><td class="label">Zonlicht (Lux)</td><td class="value">)rawliteral" + String(sun_light) + " lux" + R"rawliteral(</td><td class="control"></td></tr>
     <tr><td class="label">LDR (donker=100)</td><td class="value">)rawliteral" + String(light_ldr) + R"rawliteral(</td><td class="control"></td></tr>
     <tr><td class="label">Night mode</td><td class="value">)rawliteral" + String(night ? "JA" : "NEE") + R"rawliteral(</td><td class="control"></td></tr>
-    <tr><td class="label">MOV1 licht aan</td><td class="value">)rawliteral" + String(mov1_light ? "JA" : "NEE") + R"rawliteral(</td><td class="control"></td></tr>
-    <tr><td class="label">MOV2 licht aan</td><td class="value">)rawliteral" + String(mov2_light ? "JA" : "NEE") + R"rawliteral(</td><td class="control"></td></tr>
+        <tr><td class="label">MOV1 PIR licht aan</td><td class="value">)rawliteral" + String(mov1_light ? "JA" : "NEE") + R"rawliteral(</td><td class="control"></td></tr>
+
+    )rawliteral";
+    if (mov2_enabled) {
+      html += R"rawliteral(
+    <tr><td class="label">MOV2 PIR licht aan</td><td class="value">)rawliteral" + String(mov2_light ? "JA" : "NEE") + R"rawliteral(</td><td class="control"></td></tr>
+    )rawliteral";
+    }
+    html += R"rawliteral(
+
     <tr><td class="label">NeoPixel RGB</td><td class="value">)rawliteral" + String(neo_r) + ", " + String(neo_g) + ", " + String(neo_b) + R"rawliteral(</td>
       <td class="control"><a href="/neopixel" style="color:#336699;text-decoration:underline;">Kleur kiezen</a></td></tr>
     <tr><td class="label">Bed switch</td><td class="value">)rawliteral" + String(bed ? "AAN" : "UIT") + R"rawliteral(</td>
@@ -749,13 +757,21 @@ void setup() {
       <td class="control"><form action="/set_fade_duration" method="get" onsubmit="event.preventDefault(); submitAjax(this);"><input type="range" class="slider" name="duration" min="1" max="10" value=")rawliteral" + String(fade_duration) + R"rawliteral(" onchange="submitAjax(this.form);"></form></td></tr>
 )rawliteral";
 
-    // Dynamische pixels loop
+
+    // Dynamische pixels loop met slimme labels
     for (int i = 0; i < pixels_num; i++) {
       String label = "Pixel " + String(i);
-      if (i < 2) label += " (MOV)";
+      if (i < 2) {
+        if (i == 0) {
+          label += " (MOV1)";
+        } else if (mov2_enabled) {
+          label += " (MOV2)";
+        }
+        // Als i==1 en mov2_enabled==false → geen extra tekst
+      }
       String value = pixel_on[i] ? "On" : "Off";
       String checked = pixel_on[i] ? "checked" : "";
-      String action = (i < 2) ? "/toggle_pixel_mode" + String(i) : "/toggle_pixel" + String(i);  // Verschil AUTO/ON vs ON/OFF
+      String action = (i < 2) ? "/toggle_pixel_mode" + String(i) : "/toggle_pixel" + String(i);
       html += "<tr><td class=\"label\">" + label + "</td><td class=\"value\">" + value + "</td>";
       html += "<td class=\"control\"><form action=\"" + action + "\" method=\"get\" onsubmit=\"event.preventDefault(); submitAjax(this);\"><label class=\"switch\"><input type=\"checkbox\" " + checked + " onchange=\"submitAjax(this.form);\"><span class=\"slider-switch\"></span></label></form></td></tr>";
     }
@@ -766,14 +782,21 @@ void setup() {
       </table>
 
       <div class="group-title">BEWEGING</div>
+      
       <table>
-        <tr><td class="label">MOV1 triggers/min</td><td class="value">)rawliteral" + String(mov1_triggers) + R"rawliteral(</td><td class="control"></td></tr>
-        <tr><td class="label">MOV2 triggers/min</td><td class="value">)rawliteral" + String(mov2_triggers) + R"rawliteral(</td><td class="control"></td></tr>
+        <tr><td class="label">MOV1 PIR trig/min</td><td class="value">)rawliteral" + String(mov1_triggers) + R"rawliteral(</td><td class="control"></td></tr>
+        )rawliteral";
+    if (mov2_enabled) {
+      html += R"rawliteral(
+        <tr><td class="label">MOV2 PIR trig/min</td><td class="value">)rawliteral" + String(mov2_triggers) + R"rawliteral(</td><td class="control"></td></tr>
+        )rawliteral";
+    }
+    html += R"rawliteral(
       </table>
 
       <div class="group-title">BEWAKING</div>
       <table>
-        <tr><td class="label">Beam waarde (0-100)</td><td class="value">)rawliteral" + String(beam_value) + R"rawliteral(</td><td class="control"></td></tr>
+        <tr><td class="label">Beam sensor waarde (0-100)</td><td class="value">)rawliteral" + String(beam_value) + R"rawliteral(</td><td class="control"></td></tr>
         <tr><td class="label">Beam alert</td><td class="value">)rawliteral" + String(beam_alert_new ? "JA" : "NEE") + R"rawliteral(</td><td class="control"></td></tr>      
       </table>
 
@@ -825,16 +848,18 @@ void setup() {
             td.textContent = data.c.toFixed(1) + " °C";
           } else if (label.includes("DewAlert")) {
             td.textContent = data.k ? "JA" : "NEE";
-          } else if (label.includes("CO₂ ppm")) {
+          } else if (label.includes("CO₂")) {
             td.textContent = data.a + " ppm";
           } else if (label.includes("Stof")) {
             td.textContent = data.b;
           } else if (label.includes("Heating setpoint")) {
             td.textContent = data.aa + " °C";
-          } else if (label.includes("Ventilatie %")) {
+          } else if (label.includes("Ventilatie snelheid %")) {
             td.textContent = data.z + " %";
           } else if (label.includes("HVAC Auto")) {
             td.textContent = data.af == 0 ? "AUTO" : "MANUEEL";
+          } else if (label.includes("Hardware thermostaat")) {
+            td.textContent = data.l ? "AAN" : "UIT";
           } else if (label.includes("Heating aan")) {
             td.textContent = data.y ? "JA" : "NEE";
           } else if (label.includes("Zonlicht")) {
@@ -843,9 +868,9 @@ void setup() {
             td.textContent = data.e;
           } else if (label.includes("Night mode")) {
             td.textContent = data.q ? "JA" : "NEE";
-          } else if (label.includes("MOV1 licht aan")) {
+          } else if (label.includes("MOV1 PIR licht aan")) {
             td.textContent = data.m ? "JA" : "NEE";
-          } else if (label.includes("MOV2 licht aan")) {
+          } else if (label.includes("MOV2 PIR licht aan")) {
             td.textContent = data.n ? "JA" : "NEE";
           } else if (label.includes("NeoPixel RGB")) {
             td.textContent = data.s + ", " + data.t + ", " + data.u;
@@ -853,9 +878,9 @@ void setup() {
             td.textContent = data.r ? "AAN" : "UIT";
           } else if (label.includes("Dim snelheid (s)")) {
             td.textContent = data.ab;
-          } else if (label.includes("MOV1 triggers/min")) {
+          } else if (label.includes("MOV1 PIR trig/min")) {
             td.textContent = data.i;
-          } else if (label.includes("MOV2 triggers/min")) {
+          } else if (label.includes("MOV2 PIR trig/min")) {
             td.textContent = data.j;
           } else if (label.includes("Beam waarde")) {
             td.textContent = data.o;
@@ -1340,12 +1365,12 @@ server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request) {
           <tr>
             <td class="label">Optionele sensoren</td>
             <td class="input" colspan="2">
-              <label><input type="checkbox" name="co2" )rawliteral" + (co2_enabled ? "checked" : "") + R"rawliteral(> CO₂ (MH-Z19)</label><br>
-              <label><input type="checkbox" name="dust" )rawliteral" + (dust_enabled ? "checked" : "") + R"rawliteral(> Stof (Sharp GP2Y)</label><br>
-              <label><input type="checkbox" name="sun" )rawliteral" + (sun_light_enabled ? "checked" : "") + R"rawliteral(> Zonlicht (TSL2561)</label><br>
-              <label><input type="checkbox" name="mov2" )rawliteral" + (mov2_enabled ? "checked" : "") + R"rawliteral(> MOV2 PIR sensor</label><br>
+              <label><input type="checkbox" name="co2" )rawliteral" + (co2_enabled ? "checked" : "") + R"rawliteral(> CO₂</label><br>
+              <label><input type="checkbox" name="dust" )rawliteral" + (dust_enabled ? "checked" : "") + R"rawliteral(> Stof</label><br>
+              <label><input type="checkbox" name="sun" )rawliteral" + (sun_light_enabled ? "checked" : "") + R"rawliteral(> Zonlicht</label><br>
+              <label><input type="checkbox" name="mov2" )rawliteral" + (mov2_enabled ? "checked" : "") + R"rawliteral(> MOV2 PIR</label><br>
               <label><input type="checkbox" name="tstat" )rawliteral" + (tstat_enabled ? "checked" : "") + R"rawliteral(> Hardware thermostaat</label><br>
-              <label><input type="checkbox" name="beam" )rawliteral" + (beam_enabled ? "checked" : "") + R"rawliteral(> Beam sensor (lichtstraal)</label>
+              <label><input type="checkbox" name="beam" )rawliteral" + (beam_enabled ? "checked" : "") + R"rawliteral(> Beam sensor</label>
             </td>
           </tr>
         </table>
@@ -1647,6 +1672,9 @@ void loop() {
   mov1_triggers = countRecent(mov1Times, MOV_BUF_SIZE);
   mov2_triggers = countRecent(mov2Times, MOV_BUF_SIZE);
 
+
+
+
   // Serial rapport (wacht tot wifi ok)
     if (!ap_mode_active && millis() - lastSerial > 3000) {
     lastSerial = millis();
@@ -1668,34 +1696,53 @@ void loop() {
     Serial.printf("Heating setpoint     : %d °C\n", heating_setpoint);
     Serial.printf("Heating mode         : %s\n", heating_mode == 0 ? "AUTO" : "MANUEEL");
     Serial.printf("Thuis/Uit modus      : %s\n", home_mode ? "Thuis" : "Uit");
+    if (tstat_enabled) {
+      Serial.printf("Hardware thermostaat : %s\n", tstat_on ? "AAN" : "UIT");
+    }
     Serial.printf("Effective setpoint   : %.1f °C\n", effective_setpoint);
     Serial.printf("Heating aan          : %s\n", heating_on ? "JA" : "NEE");
-    Serial.printf("TSTAT aan (wired)    : %s\n", tstat_on ? "JA" : "NEE");
-    Serial.printf("Stof (Sharp)         : %d\n", dust);
-    Serial.printf("CO₂ ppm              : %d ppm\n", co2);
-    Serial.printf("Ventilatie %         : %d %%\n", vent_percent);
+    if (dust_enabled) {
+      Serial.printf("Stof                 : %d\n", dust);
+    }
+    if (co2_enabled) {
+      Serial.printf("CO₂                  : %d ppm\n", co2);
+    }
+    Serial.printf("Ventilatie snelheid  %         : %d %%\n", vent_percent);
     Serial.printf("Ventilation mode     : %s\n", vent_mode == 0 ? "AUTO" : "MANUEEL");
-    Serial.printf("Zonlicht (TSL2561)   : %d lux\n", sun_light);
+    if (sun_light_enabled) {
+      Serial.printf("Zonlicht             : %d lux\n", sun_light);
+    }
     Serial.printf("LDR (donker=100)     : %d\n", light_ldr);
-    Serial.printf("MOV1 triggers/min    : %d\n", mov1_triggers);
-    Serial.printf("MOV2 triggers/min    : %d\n", mov2_triggers);
-    Serial.printf("MOV1 licht aan       : %s\n", mov1_light ? "JA" : "NEE");
-    Serial.printf("MOV2 licht aan       : %s\n", mov2_light ? "JA" : "NEE");
+    Serial.printf("MOV1 PIR trig/min    : %d\n", mov1_triggers);
+    if (mov2_enabled) {
+      Serial.printf("MOV2 PIR trig/min    : %d\n", mov2_triggers);
+    }
+    Serial.printf("MOV1 PIR licht aan   : %s\n", mov1_light ? "JA" : "NEE");
+    if (mov2_enabled) {
+      Serial.printf("MOV2 PIR licht aan   : %s\n", mov2_light ? "JA" : "NEE");
+    }
     Serial.printf("Night mode (donker)  : %s\n", night ? "JA" : "NEE");
     Serial.printf("Bed switch           : %s\n", bed ? "AAN" : "UIT");
-    Serial.printf("Beam waarde (0-100)  : %d\n", beam_value);
-    Serial.printf("Beam alert (donker)  : %s\n", beam_alert_new ? "JA" : "NEE");
+    if (beam_enabled) {
+      Serial.printf("Beam sensor waarde   : %d\n", beam_value);
+      Serial.printf("Beam sensor alert    : %s\n", beam_alert_new ? "JA" : "NEE");
+    }
     Serial.printf("NeoPixel RGB         : %d, %d, %d\n", neo_r, neo_g, neo_b);
     Serial.printf("Dim snelheid (s)     : %d s\n", fade_duration);
-    Serial.printf("Fade interval        : %lu ms\n", fade_interval_ms);  // Debug toegevoegd
-    Serial.print("Pixel modes (MOV1,MOV2) : ");
-    Serial.print(pixel_mode[0]);
-    Serial.print(", ");
-    Serial.println(pixel_mode[1]);
-    Serial.print("Pixels on (0-" + String(pixels_num-1) + ") : ");
-    for (int i = 0; i < pixels_num; i++) {
-      Serial.print(pixel_on[i] ? "1" : "0");
-    }
+    Serial.print("Pixel modes");
+      if (mov2_enabled) {
+        Serial.print("(MOV1,MOV2): ");
+        Serial.print(pixel_mode[0]);
+        Serial.print(", ");
+        Serial.println(pixel_mode[1]);
+      } else {
+        Serial.print("(MOV1) : ");
+        Serial.println(pixel_mode[0]);
+      }
+    Serial.print("Pixels on (0-" + String(pixels_num-1) + ")      : ");
+      for (int i = 0; i < pixels_num; i++) {
+        Serial.print(pixel_on[i] ? "1" : "0");
+      }
     Serial.println();
     Serial.printf("WiFi RSSI            : %d dBm\n", WiFi.RSSI());
     Serial.printf("WiFi kwaliteit       : %d %%\n", constrain(2 * (WiFi.RSSI() + 100), 0, 100));
