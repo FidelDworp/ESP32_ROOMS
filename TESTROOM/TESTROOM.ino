@@ -1,20 +1,28 @@
 // ESP32_TESTROOM_Grok.ino = Transition from Photon based to ESP32 based Home automation system
 // Developed together with ChatGPT in december '25.
 // Bereikbaar op http://testroom.local of http://192.168.1.36 => Andere controller: Naam (sectie DNS/MDNS) + static IP aanpassen!
-// 16dec25: Zarlardinge: Met Grok + ChatGPT: Logica & consistentie van HVAC auto/manueel modes in orde! Enkel REFRESH blijft een issue!
+// Recht: Met Grok: 
+// 20dec25 22:30 Volgende NVS settings projectjes: Optionele sensors verbergen in UI, uitgeschakeld in Matter)
+
+
+
 
 #include <WiFi.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
-#include <Update.h>  // Voor OTA
+#include <Update.h>           // Voor OTA update
 #include <DHT.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <Adafruit_TSL2561_U.h>
 #include <Adafruit_NeoPixel.h>
 #include <time.h>
-#include <math.h>  // Voor sin()
+#include <math.h>            // Voor sin() in dimmer engine
+#include <Preferences.h>     // NVS library voor Preferences
+#include <string.h>          // Voor memset()
+Preferences preferences;     // Globale Preferences instantie
+
 
 #define DHT_PIN       18
 #define ONE_WIRE_PIN   4
@@ -27,20 +35,77 @@
 #define TSTAT_PIN     27
 #define OPTION_LDR    14
 #define NEOPIXEL_PIN  16
-#define NEOPIXEL_NUM   8
+
+
+// NVS keys (const voor netheid en veiligheid)
+const char* NVS_ROOM_ID             = "room_id";
+const char* NVS_WIFI_SSID           = "wifi_ssid";
+const char* NVS_WIFI_PASS           = "wifi_password";
+const char* NVS_STATIC_IP           = "static_ip";
+const char* NVS_HEATING_SETPOINT    = "heat_setpoint";
+const char* NVS_VENT_REQUEST        = "vent_request";
+const char* NVS_DEW_MARGIN          = "dew_margin";
+const char* NVS_HOME_MODE           = "home_mode";
+const char* NVS_LIGHT_THRESHOLD     = "light_thresh";
+const char* NVS_MOV_WINDOW          = "mov_window";
+const char* NVS_LDR_DARK            = "ldr_dark";
+const char* NVS_BEAM_THRESHOLD       = "beam_thresh";
+const char* NVS_CO2_ENABLED         = "co2_en";
+const char* NVS_DUST_ENABLED        = "dust_en";
+const char* NVS_SUN_ENABLED         = "sun_en";
+const char* NVS_MOV2_ENABLED        = "mov2_en";
+const char* NVS_TSTAT_ENABLED       = "tstat_en";
+const char* NVS_BEAM_ENABLED        = "beam_en";
+const char* NVS_NEO_R = "neo_r";
+const char* NVS_NEO_G = "neo_g";
+const char* NVS_NEO_B = "neo_b";
+const char* NVS_PIXELS_NUM = "pixels_num";
+const char* NVS_BED_STATE        = "bed_state";       // bool: bed AAN/UIT
+const char* NVS_CURRENT_SETPOINT = "curr_setpoint";   // int: huidige gekozen temperatuur
+const char* NVS_FADE_DURATION    = "fade_duration";   // int: dim-snelheid in seconden (1-10)
+const char* NVS_HOME_MODE_STATE = "home_mode_state";  // int: 0 = Uit, 1 = Thuis
+
+
 
 // Initialize libraries
 DHT dht(DHT_PIN, DHT22);
 OneWire oneWire(ONE_WIRE_PIN);
 DallasTemperature ds18b20(&oneWire);
 Adafruit_TSL2561_Unified tsl = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT, 12345);
-Adafruit_NeoPixel pixels(NEOPIXEL_NUM, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel pixels(1, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);  // Tijdelijk 1, lengte wordt in setup() gezet
 AsyncWebServer server(80);
 
 
-// Logingegevens voor wifi
-const char* WIFI_SSID = "Delannoy";
-const char* WIFI_PASS = "kampendaal,34";
+
+// Room-specifieke instellingen (worden uit NVS geladen)
+String room_id              = "Testroom";      // Default bij eerste flash
+String mdns_name            = "Testroom";      // Identiek aan room_id
+String wifi_ssid            = "netwerknaam";
+String wifi_pass            = "paswoord";
+String static_ip_str        = "192.168.xx.xx"; // Wordt omgezet naar IPAddress
+
+// Configureerbare defaults
+int heating_setpoint_default = 20;
+int vent_request_default     = 0;
+float dew_safety_margin      = 2.0;
+int home_mode_default        = 0;              // 0 = Weg
+int light_dark_threshold     = 50;
+unsigned long mov_window_ms  = 60000;
+int ldr_dark_threshold       = 50;
+int beam_alert_threshold     = 50;
+
+// Optionele feature enables (default 1 = aan)
+bool co2_enabled   = true;
+bool dust_enabled  = true;
+bool sun_light_enabled = true;
+bool mov2_enabled  = true;
+bool tstat_enabled = true;
+bool beam_enabled  = true;
+int pixels_num = 8;         // Default. Configureerbaar via NVS (1-30)
+
+
+// AP mode (Access Point)
+bool ap_mode_active = false;  // Track of we in AP fallback zitten
 
 
 // HVAC Variabelen
@@ -51,6 +116,7 @@ int heating_on = 0;         // y: Verwarming aan (0/1, auto of manueel)
 int vent_percent = 0;       // z: Ventilatie % (0-100, auto of manueel)
 int heating_mode = 0;       // 0 = AUTO, 1 = MANUEEL voor heating
 int vent_mode = 0;          // 0 = AUTO, 1 = MANUEEL voor ventilation (slider zet naar 1)
+int home_mode = 1;          // 1 = Thuis (hardware thermostaat prioriteit), 0 = Uit (ESP regelt met anti-condens)
 
 
 // Sensor variabelen
@@ -70,33 +136,38 @@ uint8_t neo_b = 255;       // Voor u: B waarde (hardcoded 255)
 
 // Pixel specifieke arrays
 int pixel_mode[2] = {0, 0};  // Voor pixel 0 en 1: 0 = AUTO (PIR), 1 = MANUEEL ON (RGB)
-bool pixel_on[NEOPIXEL_NUM] = {false};  // Huidige aan/uit status voor alle 8 pixels (voor display/JSON)
+
+
+bool pixel_on[30] = {false};
+
+uint8_t currR[30], currG[30], currB[30];
+uint8_t targetR[30], targetG[30], targetB[30];
+uint8_t startR[30], startG[30], startB[30];
+float fade_progress[30] = {0.0};
+
 
 // PIR op 3.3V: beweging = LOW
 unsigned long mov1_off_time = 0;
 unsigned long mov2_off_time = 0;
 const unsigned long LIGHT_ON_DURATION = 30000;
-const int LDR_DARK_THRESHOLD = 40;
+int LDR_DARK_THRESHOLD = 40;  // Wordt overschreven door NVS waarde
+unsigned long MOV_WINDOW_MS = 60000;  // Wordt overschreven door NVS (in ms)
 
-#define MOV_WINDOW 60000
+
 #define MOV_BUF_SIZE 50
 unsigned long mov1Times[MOV_BUF_SIZE] = {0};
 unsigned long mov2Times[MOV_BUF_SIZE] = {0};
 
+
 // Pixel Fade engine
-uint8_t currR[NEOPIXEL_NUM], currG[NEOPIXEL_NUM], currB[NEOPIXEL_NUM];
-uint8_t targetR[NEOPIXEL_NUM], targetG[NEOPIXEL_NUM], targetB[NEOPIXEL_NUM];
-uint8_t startR[NEOPIXEL_NUM], startG[NEOPIXEL_NUM], startB[NEOPIXEL_NUM];  // Missing, nu toegevoegd
 unsigned long lastFadeStep = 0;
 unsigned long fade_interval_ms = 15;        // Dynamische interval, initieel 15 ms (wordt herberekend)
 int fade_duration = 2;                      // Dimsnelheid in seconden (1-10, default 2)
 const int FADE_NUM_STEPS = 20;              // 20 stappen = heel smooth, maar nog snel genoeg
-float fade_progress[NEOPIXEL_NUM] = {0.0};  // Per pixel progress (0.0-1.0) voor sine-easing
-
 
 
 void initFadeEngine() {
-  for (int i = 0; i < NEOPIXEL_NUM; i++) {
+  for (int i = 0; i < pixels_num; i++) {
     uint32_t c = pixels.getPixelColor(i);
     currR[i] = (c >> 16) & 0xFF;
     currG[i] = (c >> 8)  & 0xFF;
@@ -108,7 +179,7 @@ void initFadeEngine() {
 
 
 void setTargetColor(int idx, uint8_t r, uint8_t g, uint8_t b) {
-  if (idx < 0 || idx >= NEOPIXEL_NUM) return;
+  if (idx < 0 || idx >= pixels_num) return;
   if (targetR[idx] != r || targetG[idx] != g || targetB[idx] != b) {
     targetR[idx] = r;
     targetG[idx] = g;
@@ -127,7 +198,7 @@ void updateFades() {
   lastFadeStep = now;
   bool changed = false;
 
-  for (int i = 0; i < NEOPIXEL_NUM; i++) {
+  for (int i = 0; i < pixels_num; i++) {
     // Skip als fade al klaar is
     if (fade_progress[i] >= 1.0f && 
         currR[i] == targetR[i] && 
@@ -177,7 +248,7 @@ void updateFadeInterval() {
 void pushEvent(unsigned long *buf, int size) {
   unsigned long now = millis();
   for (int i = 0; i < size; i++) {
-    if (buf[i] == 0 || (now - buf[i] > MOV_WINDOW)) { buf[i] = now; return; }
+    if (buf[i] == 0 || (now - buf[i] > MOV_WINDOW_MS)) { buf[i] = now; return; }
   }
   int oldest = 0; unsigned long old = buf[0];
   for (int i = 1; i < size; i++) if (buf[i] < old) { old = buf[i]; oldest = i; }
@@ -186,17 +257,35 @@ void pushEvent(unsigned long *buf, int size) {
 
 int countRecent(unsigned long *buf, int size) {
   unsigned long now = millis(); int c = 0;
-  for (int i = 0; i < size; i++) if (buf[i] && (now - buf[i] <= MOV_WINDOW)) c++;
+  for (int i = 0; i < size; i++) if (buf[i] && (now - buf[i] <= MOV_WINDOW_MS)) c++;
   return c;
 }
 
 float calculateDewPoint(float t, float h) { return isnan(t) || isnan(h) ? 0 : t - ((100 - h) / 5.0); } // Berekening dauwpunt met DHT22 data
+
 int scaleLDR(int r) { return map(constrain(r, 100, 3800), 100, 3800, 100, 0); }
+
 int readDust() { digitalWrite(SHARP_LED, LOW); delayMicroseconds(280); int v = analogRead(SHARP_ANALOG); delayMicroseconds(40); digitalWrite(SHARP_LED, HIGH); delayMicroseconds(9680); return v; }
+
 int readCO2() {
   unsigned long h = pulseIn(CO2_PWM, HIGH, 200000);  // Timeout 0.2s i.p.v. 0.1s (i.p.v. 2s vroeger: blocking!)
   unsigned long l = pulseIn(CO2_PWM, LOW, 200000);
   return (h < 100 || l < 100) ? 0 : (int)(5000.0 * (h - 2.0) / (h + l - 4.0));
+}
+
+
+void handleSerialCommands() {
+  if (Serial.available() > 0) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    if (cmd.equalsIgnoreCase("reset_nvs")) {
+      Serial.println("\n=== FACTORY RESET NVS UITGEVOERD ===");
+      preferences.clear();
+      Serial.println("NVS gewist – reboot...");
+      delay(500);
+      ESP.restart();
+    }
+  }
 }
 
 
@@ -205,7 +294,7 @@ String getJSON() {
   String pixel_on_str = "";
   String pixel_mode_str = String(pixel_mode[0]) + String(pixel_mode[1]);  // Voor toggle checkboxes
 
-  for (int i = 0; i < NEOPIXEL_NUM; i++) {
+  for (int i = 0; i < pixels_num; i++) {
     pixel_on_str += pixel_on[i] ? "1" : "0";
   }
 
@@ -239,7 +328,8 @@ String getJSON() {
          ",\"ab\":" + String(fade_duration) +
          ",\"ac\":" + String(uptime_sec) +
          ",\"ad\":\"" + pixel_on_str + "\"" +
-         ",\"ae\":\"" + pixel_mode_str + "\"}";
+         ",\"ae\":\"" + pixel_mode_str + "\"" +
+         ",\"af\":" + String(home_mode) + "}";
 }
 
 
@@ -264,38 +354,209 @@ String getFormattedDateTime() {
 
 
 
+
 void setup() {
 
   Serial.begin(115200);
+  
+  // === NVS INITIALISATIE ===
+  preferences.begin("room-config", false);  // read/write mode
+  
+  // Detecteer eerste boot / lege NVS → zet defaults + melding
+  bool first_boot = preferences.getString(NVS_ROOM_ID, "").isEmpty();
+  
+  if (first_boot) {
+    Serial.println("\n*** EERSTE BOOT GEDTECTEERD – DEFAULTS TOEPASSEN ***");
+    
+    // Zet alle defaults in NVS
+    preferences.putString(NVS_ROOM_ID, "Testroom");
+    preferences.putString(NVS_WIFI_SSID, "netwerknaam");
+    preferences.putString(NVS_WIFI_PASS, "paswoord");
+    preferences.putString(NVS_STATIC_IP, "192.168.xx.xx");
+    
+    preferences.putInt(NVS_HEATING_SETPOINT, 20);
+    preferences.putInt(NVS_VENT_REQUEST, 0);
+    preferences.putFloat(NVS_DEW_MARGIN, 2.0);
+    preferences.putInt(NVS_HOME_MODE, 0);
+    preferences.putInt(NVS_LIGHT_THRESHOLD, 50);
+    preferences.putULong(NVS_MOV_WINDOW, 60000UL);
+    preferences.putInt(NVS_LDR_DARK, 50);
+    preferences.putInt(NVS_BEAM_THRESHOLD, 50);
+    
+    // Alle optionele features default aan
+    preferences.putBool(NVS_CO2_ENABLED, true);
+    preferences.putBool(NVS_DUST_ENABLED, true);
+    preferences.putBool(NVS_SUN_ENABLED, true);
+    preferences.putBool(NVS_MOV2_ENABLED, true);
+    preferences.putBool(NVS_TSTAT_ENABLED, true);
+    preferences.putBool(NVS_BEAM_ENABLED, true);
+    preferences.putUChar(NVS_NEO_R, 255);
+    preferences.putUChar(NVS_NEO_G, 255);
+    preferences.putUChar(NVS_NEO_B, 255);
+    preferences.putInt(NVS_PIXELS_NUM, 8);
+
+    
+    Serial.println("Defaults opgeslagen in NVS. Configureer via webinterface /settings");
+  }
+  
+  // Laad alles uit NVS (ook na eerste boot)
+  room_id = preferences.getString(NVS_ROOM_ID, "Testroom");
+    mdns_name = room_id;              // Kopieer room_id
+    mdns_name.toLowerCase();          // Alles lowercase
+    mdns_name.replace(" ", "-");      // Spaties vervangen door -
+  wifi_ssid             = preferences.getString(NVS_WIFI_SSID, "netwerknaam");
+  wifi_pass             = preferences.getString(NVS_WIFI_PASS, "paswoord");
+  static_ip_str         = preferences.getString(NVS_STATIC_IP, "192.168.xx.xx");
+  
+  heating_setpoint_default = preferences.getInt(NVS_HEATING_SETPOINT, 20);
+  vent_request_default     = preferences.getInt(NVS_VENT_REQUEST, 0);
+  dew_safety_margin        = preferences.getFloat(NVS_DEW_MARGIN, 2.0);
+  home_mode_default        = preferences.getInt(NVS_HOME_MODE, 0);
+  light_dark_threshold     = preferences.getInt(NVS_LIGHT_THRESHOLD, 50);
+  mov_window_ms            = preferences.getULong(NVS_MOV_WINDOW, 60000UL);
+  ldr_dark_threshold       = preferences.getInt(NVS_LDR_DARK, 50);
+  beam_alert_threshold     = preferences.getInt(NVS_BEAM_THRESHOLD, 50);
+  
+  co2_enabled      = preferences.getBool(NVS_CO2_ENABLED, true);
+  dust_enabled     = preferences.getBool(NVS_DUST_ENABLED, true);
+  sun_light_enabled= preferences.getBool(NVS_SUN_ENABLED, true);
+  mov2_enabled     = preferences.getBool(NVS_MOV2_ENABLED, true);
+  tstat_enabled    = preferences.getBool(NVS_TSTAT_ENABLED, true);
+  beam_enabled     = preferences.getBool(NVS_BEAM_ENABLED, true);
+  neo_r = preferences.getUChar(NVS_NEO_R, 255);
+  neo_g = preferences.getUChar(NVS_NEO_G, 255);
+  neo_b = preferences.getUChar(NVS_NEO_B, 255);
+  pixels_num = preferences.getInt(NVS_PIXELS_NUM, 8);
+  pixels_num = constrain(pixels_num, 1, 30);          // Laad aantal pixels uit NVS. (limiet)
+
+
+  memset(pixel_on, 0, sizeof(pixel_on));     // Alle pixel toggles uit bij start
+  memset(pixel_mode, 0, sizeof(pixel_mode)); // Veiligheid: pixel_mode[0..1] ook resetten
+
+
+  
+  // Pas runtime variabelen aan met geladen waarden
+  heating_setpoint = heating_setpoint_default;
+  vent_percent     = vent_request_default;
+  home_mode        = home_mode_default;
+  LDR_DARK_THRESHOLD = ldr_dark_threshold;      // Const vervangen door variabele
+
+
+
+  // Bed modus persistent maken
+  bed = preferences.getBool(NVS_BED_STATE, false);  // default: UIT
+
+  // Thuis/Uit modus persistent maken
+  home_mode = preferences.getInt(NVS_HOME_MODE_STATE, home_mode_default);
+
+  // Heating Setpoint persistent maken
+  heating_setpoint = preferences.getInt(NVS_CURRENT_SETPOINT, heating_setpoint_default);
+
+  // Fade duration persistent maken
+  fade_duration = preferences.getInt(NVS_FADE_DURATION, 2);
+  fade_duration = constrain(fade_duration, 1, 10);
+  updateFadeInterval();
+
+
+  
+  Serial.printf("Room ID: %s\n", room_id.c_str());
+  Serial.printf("mDNS naam: %s.local\n", mdns_name.c_str());
+  
+  if (first_boot) {
+    Serial.println("Typ 'reset_nvs' in serial monitor voor factory reset");
+  }
+
+
   pinMode(PIR_MOV1, INPUT_PULLUP);  // Voor 3.3V HC-SR501: beweging = LOW
   pinMode(PIR_MOV2, INPUT_PULLUP);
   pinMode(SHARP_LED, OUTPUT); digitalWrite(SHARP_LED, HIGH);
   pinMode(TSTAT_PIN, INPUT_PULLUP);
   pinMode(OPTION_LDR, INPUT);
 
+
   dht.begin();
   ds18b20.begin();
   if (!tsl.begin()) Serial.println("TSL2561 niet gevonden");
   tsl.enableAutoRange(true);
   tsl.setIntegrationTime(TSL2561_INTEGRATIONTIME_13MS);
-  pixels.begin(); pixels.clear(); pixels.show();
+
+
+  pixels.begin();
+  pixels.updateLength(pixels_num);  // Nu correct na laden pixels_num
+  pixels.clear();
+  pixels.show();
+  initFadeEngine();
+
+
   initFadeEngine();
   updateFadeInterval();
 
+
+
+
   WiFi.mode(WIFI_STA);
 
-  // Kies met of zonder DNS (moet met voor datum-tijd)
-  //WiFi.config(IPAddress(192,168,1,36), IPAddress(192,168,1,1), IPAddress(255,255,255,0)); // Zonder DNS
-  WiFi.config(
-  IPAddress(192,168,1,36),
-  IPAddress(192,168,1,1),
-  IPAddress(255,255,255,0),
-  IPAddress(192,168,1,1)
-);   // Mét DNS
+  // === DYNAMISCHE WIFI + STATIC IP UIT NVS ===
+  IPAddress local_ip;
+  if (local_ip.fromString(static_ip_str)) {
+    // Valide IP gevonden in NVS → gebruik static config
+    IPAddress gateway;
+    IPAddress subnet(255, 255, 255, 0);
 
+    // Simpele heuristiek: gateway is meestal .1 in hetzelfde subnet
+    gateway = local_ip;
+    gateway[3] = 1;
 
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+    WiFi.config(local_ip, gateway, subnet, gateway);  // DNS = gateway
+    Serial.printf("Static IP ingesteld: %s (gateway %s)\n", local_ip.toString().c_str(), gateway.toString().c_str());
+  } else {
+    Serial.println("Geen geldig static IP in NVS → DHCP gebruiken");
+  }
+
+  // Verbind met WiFi uit NVS
+  Serial.print("Verbinden met WiFi SSID: ");
+  Serial.println(wifi_ssid);
+  WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
+
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 40) {  // 20 seconden timeout
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+
+  // WiFi successfully connected!
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi verbonden!");
+    Serial.println("IP adres: " + WiFi.localIP().toString());
+    ap_mode_active = false;  // Normale mode
+  } else {
+
+    Serial.println("\nWiFi verbinding mislukt! Starten Access Point voor configuratie...");
+    
+    WiFi.mode(WIFI_AP_STA);
+    
+    String ap_ssid = "ROOM-" + room_id;           // bijv. ROOM-Testroom
+    const char* ap_pass = "roomconfig";            // 10 tekens, duidelijk en veilig genoeg voor config
+    
+    // Start AP met WPA2 beveiliging (standaard is goed)
+    WiFi.softAP(ap_ssid.c_str(), ap_pass);
+    
+    IPAddress ap_ip(192, 168, 4, 1);
+    WiFi.softAPConfig(ap_ip, ap_ip, IPAddress(255, 255, 255, 0));
+    
+    Serial.println("\n=== ACCESS POINT GESTART ===");
+    Serial.printf("SSID: %s\n", ap_ssid.c_str());
+    Serial.println("Wachtwoord: roomconfig");
+    Serial.println("IP: http://192.168.4.1");
+    Serial.println("Ga naar http://192.168.4.1/settings om je WiFi in te stellen");
+    Serial.println("Na opslaan reboot de controller automatisch");
+    Serial.println("=======================================\n");
+    
+    // Belangrijk: geef de iPhone tijd om het netwerk te zien
+    delay(1000);
+    ap_mode_active = true;
+  }
 
 
   // ===== TIJDINITIALISATIE (ESP32 native SNTP) =====
@@ -312,12 +573,18 @@ void setup() {
 
 
   Serial.println("\nIP: " + WiFi.localIP().toString());
-  if (MDNS.begin("testroom")) Serial.println("mDNS: http://testroom.local");
-  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
-  DefaultHeaders::Instance().addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-  DefaultHeaders::Instance().addHeader("Pragma", "no-cache");
-  DefaultHeaders::Instance().addHeader("Expires", "0");
 
+  if (MDNS.begin(mdns_name.c_str())) {
+    Serial.printf("mDNS gestart: http://%s.local\n", mdns_name.c_str());
+  } else {
+    Serial.println("Fout bij starten mDNS");
+  }
+
+
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+  DefaultHeaders::Instance().addHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0");
+  DefaultHeaders::Instance().addHeader("Pragma", "no-cache");
+  DefaultHeaders::Instance().addHeader("Expires", "-1");
 
 
 
@@ -414,7 +681,7 @@ void setup() {
 </head>
 <body>
   <div class="header">
-    <div class="header-left">Testroom</div>
+    <div class="header-left">)rawliteral" + room_id + R"rawliteral(</div>
     <div class="header-right">
       )rawliteral";
     html += String(uptime_sec) + " s &nbsp;&nbsp; " + getFormattedDateTime();  // Pas datum aan (NTP)
@@ -427,6 +694,7 @@ void setup() {
       <a href="/" class="active">Status</a>
       <a href="/update">OTA</a>
       <a href="/status.json">JSON</a>
+      <a href="/settings">Settings</a>
     </div>
 
 
@@ -455,6 +723,12 @@ void setup() {
     <tr><td class="label">Vent Auto</td><td class="value">)rawliteral" + String(vent_mode == 0 ? "AUTO" : "MANUEEL") + R"rawliteral(</td>
       <td class="control"><form action="/toggle_vent_auto" method="get" onsubmit="event.preventDefault(); submitAjax(this);"><label class="switch"><input type="checkbox" )rawliteral" + (vent_mode == 0 ? "checked" : "") + R"rawliteral( onchange="submitAjax(this.form);"><span class="slider-switch"></span></label></form></td></tr>
 
+    <tr><td class="label">Thuis/Uit</td><td class="value">)rawliteral" + String(home_mode ? "Thuis" : "Uit") + R"rawliteral(</td>
+       <td class="control"><form action="/toggle_home" method="get" onsubmit="event.preventDefault(); submitAjax(this);">
+       <label class="switch"><input type="checkbox" )rawliteral" + (home_mode ? "checked" : "") + R"rawliteral( onchange="submitAjax(this.form);">
+       <span class="slider-switch"></span></label>
+    </form></td></tr>
+
     <tr><td class="label">Heating aan</td><td class="value">)rawliteral" + String(heating_on ? "JA" : "NEE") + R"rawliteral(</td><td class="control"></td></tr>
   </table>
 
@@ -476,7 +750,7 @@ void setup() {
 )rawliteral";
 
     // Dynamische pixels loop
-    for (int i = 0; i < NEOPIXEL_NUM; i++) {
+    for (int i = 0; i < pixels_num; i++) {
       String label = "Pixel " + String(i);
       if (i < 2) label += " (MOV)";
       String value = pixel_on[i] ? "On" : "Off";
@@ -516,8 +790,9 @@ void setup() {
           <button class="button" onclick="updateValues()">Refresh Data</button>
       </div>
 
+      <div id="status" style="text-align:center; margin:20px 0; font-weight:bold; color:#336699;"></div>
       <p style="font-size:12px; color:#666; text-align:center; margin-top:10px;">
-        Tip: Op iPhone kun je ook naar beneden swipen om te verversen.
+        Tip: iPhone refresh = button of naar beneden swipen.
       </p>
 
     </div>
@@ -527,12 +802,15 @@ void setup() {
 <script>
   // Live update zonder volledige reload
   function updateValues() {
-    fetch('/status.json', {
+    fetch('/status.json?' + new Date().getTime() + Math.random(), {
       method: 'GET',
-      cache: 'no-store'
+      cache: 'no-store'  // Extra forceer no-cache op de request zelf
     })
+
       .then(response => response.json())
       .then(data => {
+
+
         // Update alle waarden
         document.querySelectorAll('td.value').forEach(td => {
           const labelTd = td.previousElementSibling;
@@ -601,6 +879,12 @@ void setup() {
           hvacToggle.checked = (data.af == 0);
         }
 
+        // Update Thuis/Uit toggle (checked = Thuis)
+        const homeToggle = document.querySelector('td.control form[action="/toggle_home"] input[type="checkbox"]');
+        if (homeToggle) {
+          homeToggle.checked = (data.af == 1);
+        }
+
         // Update pixel toggles (checked = manueel)
         document.querySelectorAll('td.control form[action^="/toggle_pixel_mode"] input[type="checkbox"]').forEach((checkbox, idx) => {
           checkbox.checked = (data.ae.charAt(idx) === '1');
@@ -628,9 +912,23 @@ void setup() {
     const url = queryString ? form.action + '?' + queryString : form.action;
 
     fetch(url, { method: 'GET' })
-      .then(() => updateValues())
-      .catch(err => console.error('Submit error:', err));
+      .then(response => {
+        if (response.ok) {
+          updateValues(); // Direct alle waarden refreshen
+          const statusDiv = document.getElementById('status');
+          if (statusDiv) {
+            statusDiv.textContent = 'Bijgewerkt!';
+            setTimeout(() => { statusDiv.textContent = ''; }, 2000);
+          }
+        }
+      })
+      .catch(err => {
+        console.error('Submit error:', err);
+        const statusDiv = document.getElementById('status');
+        if (statusDiv) statusDiv.textContent = 'Fout bij bijwerken';
+      });
   }
+
 
   window.addEventListener('load', () => {
     updateValues();
@@ -649,10 +947,9 @@ void setup() {
 
 
   // === JSON ENDPOINT ===
-  server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *r) {
-    r->send(200, "application/json", getJSON());
+    server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/json", getJSON());
   });
-
 
 
   // === OTA UPDATE PAGE ===
@@ -699,7 +996,7 @@ void setup() {
 </head>
 <body>
   <div class="header">
-    <div class="header-left">Testroom</div>
+    <div class="header-left">)rawliteral" + room_id + R"rawliteral(</div>
     <div class="header-right">
       )rawliteral" + String(uptime_sec) + " s &nbsp;&nbsp; " + getFormattedDateTime() + R"rawliteral(
     </div>
@@ -709,6 +1006,7 @@ void setup() {
       <a href="/">Status &<br>Control</a>
       <a href="/update" class="active">OTA<br>Update</a>
       <a href="/status.json">JSON<br>Data</a>
+      <a href="/settings">Settings</a>
     </div>
     <div class="main">
       <h1 style="color:#336699;">OTA Firmware Update</h1>
@@ -767,15 +1065,18 @@ void setup() {
   });
 
 
+
   // Toggle voor Bed (r)
   server.on("/toggle_bed", HTTP_GET, [](AsyncWebServerRequest *request) {
-    bed = !bed;  // Toggle 0/1
+    bed = !bed;
+    preferences.putBool(NVS_BED_STATE, bed);  // direct opslaan
     request->send(200, "text/plain", "OK");
   });
 
 
+
   // Toggles voor pixels 0-1 (mode AUTO/ON) en 2-7 (on/off)
-  for (int i = 0; i < NEOPIXEL_NUM; i++) {
+  for (int i = 0; i < pixels_num; i++) {
     String path = (i < 2) ? "/toggle_pixel_mode" + String(i) : "/toggle_pixel" + String(i);
     server.on(path.c_str(), HTTP_GET, [i](AsyncWebServerRequest *request) {  // Capture i
       if (i < 2) {
@@ -788,11 +1089,13 @@ void setup() {
   }
 
 
+
+
   // === NEOPIXEL KLEURKIEZER PAGE ===
-  server.on("/neopixel", HTTP_GET, [](AsyncWebServerRequest *request) {
-  String html;
-  html.reserve(4000);
-  html = R"rawliteral(
+    server.on("/neopixel", HTTP_GET, [](AsyncWebServerRequest *request) {
+    String html;
+    html.reserve(5000);
+    html = R"rawliteral(
 <!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -824,14 +1127,15 @@ void setup() {
     input[type=range] {width:80%;height:30px;}
     .button {
       background:#336699;color:white;padding:12px 24px;border:none;
-      border-radius:8px;cursor:pointer;font-size:16px;margin-top:20px;
+      border-radius:8px;cursor:pointer;font-size:16px;margin-top:30px;
     }
     .button:hover {background:#003366;}
+    #status {margin-top:20px;font-weight:bold;color:#336699;}
   </style>
 </head>
 <body>
   <div class="header">
-    <div class="header-left">Testroom</div>
+    <div class="header-left">)rawliteral" + room_id + R"rawliteral(</div>
     <div class="header-right">
       )rawliteral" + String(uptime_sec) + " s &nbsp;&nbsp; " + getFormattedDateTime() + R"rawliteral(
     </div>
@@ -841,18 +1145,47 @@ void setup() {
       <a href="/">Status &<br>Control</a>
       <a href="/update">OTA<br>Update</a>
       <a href="/status.json">JSON<br>Data</a>
+      <a href="/settings">Settings</a>
     </div>
     <div class="main">
       <h1 style="color:#336699;">NeoPixel Kleur Instellen</h1>
-      <form action="/setcolor" method="get“ onsubmit="event.preventDefault(); submitAjax(this);">
-        <p>R: <input type="range" name="r" min="0" max="255" value=")rawliteral" + String(neo_r) + R"rawliteral("><br><br></p>
-        <p>G: <input type="range" name="g" min="0" max="255" value=")rawliteral" + String(neo_g) + R"rawliteral("><br><br></p>
-        <p>B: <input type="range" name="b" min="0" max="255" value=")rawliteral" + String(neo_b) + R"rawliteral("><br><br></p>
-        <button class="button" type="submit">Kleur instellen</button>
+      <form id="colorForm">
+        <p>R: <input type="range" name="r" min="0" max="255" value=")rawliteral" + String(neo_r) + R"rawliteral("><span id="r_val"> )rawliteral" + String(neo_r) + R"rawliteral(</span><br><br></p>
+        <p>G: <input type="range" name="g" min="0" max="255" value=")rawliteral" + String(neo_g) + R"rawliteral("><span id="g_val"> )rawliteral" + String(neo_g) + R"rawliteral(</span><br><br></p>
+        <p>B: <input type="range" name="b" min="0" max="255" value=")rawliteral" + String(neo_b) + R"rawliteral("><span id="b_val"> )rawliteral" + String(neo_b) + R"rawliteral(</span><br><br></p>
+        <button type="submit" class="button">Pas kleur toe</button>
       </form>
+      <div id="status"></div>
       <br><br><a href="/" style="color:#336699;text-decoration:underline;">← Terug naar Status</a>
     </div>
   </div>
+<script>
+  document.querySelectorAll('input[type=range]').forEach(slider => {
+    const output = document.getElementById(slider.name + '_val');
+    output.textContent = slider.value;
+    slider.oninput = function() {
+      output.textContent = this.value;
+    }
+  });
+
+  document.getElementById('colorForm').onsubmit = function(e) {
+    e.preventDefault();
+    const params = new URLSearchParams();
+    params.append('r', document.querySelector('input[name=r]').value);
+    params.append('g', document.querySelector('input[name=g]').value);
+    params.append('b', document.querySelector('input[name=b]').value);
+
+    fetch('/setcolor?' + params.toString(), {method: 'GET'})
+      .then(response => response.text())
+      .then(text => {
+        document.getElementById('status').textContent = 'Kleur toegepast!';
+        setTimeout(() => { document.getElementById('status').textContent = ''; }, 2000);
+      })
+      .catch(err => {
+        document.getElementById('status').textContent = 'Fout bij toepassen';
+      });
+  };
+</script>
 </body>
 </html>
 )rawliteral";
@@ -861,39 +1194,285 @@ void setup() {
 
 
 
+
+
+// === SETTINGS PAGE - complete versie, werkende checkboxes ===
+server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request) {
+  String html;
+  html.reserve(14000);
+
+  html = R"rawliteral(
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>)rawliteral" + room_id + R"rawliteral( - Instellingen</title>
+  <style>
+    body {font-family:Arial,Helvetica,sans-serif;background:#ffffff;margin:0;padding:0;}
+    .header {display:flex;background:#ffcc00;color:black;padding:10px 15px;font-size:18px;font-weight:bold;align-items:center;box-sizing:border-box;}
+    .header-left {flex:1;text-align:left;}
+    .header-right {flex:1;text-align:right;font-size:15px;}
+    .container {display:flex;flex-direction:row;min-height:calc(100vh - 60px);}
+    .sidebar {width:80px;padding:10px 5px;background:#ffffff;border-right:3px solid #cc0000;box-sizing:border-box;flex-shrink:0;}
+    .sidebar a {display:block;background:#336699;color:white;padding:8px;margin:8px 0;text-decoration:none;font-weight:bold;font-size:12px;border-radius:6px;text-align:center;line-height:1.3;width:60px;box-sizing:border-box;margin-left:auto;margin-right:auto;}
+    .sidebar a:hover {background:#003366;}
+    .sidebar a.active {background:#cc0000;}
+    .main {flex:1;padding:20px;overflow-y:auto;box-sizing:border-box;}
+    .warning {background:#ffe6e6;border:2px solid #cc0000;padding:15px;margin:20px;border-radius:8px;text-align:center;font-weight:bold;color:#990000;}
+    .form-table {width:100%;border-collapse:collapse;margin:20px 0;}
+    .form-table td.label {width:35%;padding:12px 8px;vertical-align:middle;font-weight:bold;color:#336699;}
+    .form-table td.input {width:40%;padding:12px 8px;vertical-align:middle;}
+    .form-table td.hint {width:25%;padding:12px 8px;vertical-align:middle;font-size:12px;color:#666;font-style:italic;}
+    .form-table input[type=text], .form-table input[type=password], .form-table input[type=number], .form-table select {width:100%;padding:8px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;}
+    .form-table tr {border-bottom:1px solid #eee;}
+    .submit-btn {background:#336699;color:white;padding:12px 30px;border:none;border-radius:6px;font-size:16px;cursor:pointer;margin:20px 10px;}
+    .submit-btn:hover {background:#003366;}
+    .reset-btn {background:#cc0000;color:white;padding:12px 30px;border:none;border-radius:6px;font-size:16px;cursor:pointer;margin:20px 10px;}
+    .reset-btn:hover {background:#990000;}
+    @media (max-width: 800px) {
+      .container {flex-direction:column;}
+      .sidebar {width:100%;border-right:none;border-bottom:3px solid #cc0000;padding:10px 0;display:flex;justify-content:center;}
+      .sidebar a {width:80px;margin:0 5px;}
+      .form-table td.hint {display:none;}
+      .form-table td.label, .form-table td.input {width:50%;}
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">)rawliteral" + room_id + R"rawliteral(</div>
+    <div class="header-right">Instellingen</div>
+  </div>
+  <div class="container">
+    <div class="sidebar">
+      <a href="/">Status</a>
+      <a href="/update">OTA</a>
+      <a href="/status.json">JSON</a>
+      <a href="/settings" class="active">Settings</a>
+    </div>
+    <div class="main">
+      <div class="warning">
+        OPGEPAST: Wijzigt permanente instellingen van deze controller!<br>
+        Verkeerde WiFi-instellingen kunnen de controller onbereikbaar maken!<br><br>
+        <strong>Geen verbinding met WiFi?</strong><br>
+        De controller start automatisch een eigen netwerk:<br>
+        • Naam: ROOM-<i>jouw_room_naam</i><br>
+        • Wachtwoord: roomconfig<br><br>
+        Verbind je telefoon met dit netwerk en open:<br>
+        <strong>http://192.168.4.1/settings</strong><br>
+        Stel daar je echte WiFi in en klik "Opslaan & Reboot".<br><br>
+        <strong>Tip voor static IP:</strong><br>
+        Leeg laten = automatisch IP (DHCP, aanbevolen).<br>
+        Voor iPhone hotspot: gebruik een IP in het bereik 172.20.10.10 t/m 172.20.10.14.
+      </div>
+
+      <form action="/save_settings" method="get" id="settingsForm">
+        <table class="form-table">
+          <tr>
+            <td class="label">Room naam</td>
+            <td class="input"><input type="text" name="room_id" value=")rawliteral" + room_id + R"rawliteral(" required></td>
+            <td class="hint">Naam van de kamer (ook in header)</td>
+          </tr>
+          <tr>
+            <td class="label">WiFi SSID</td>
+            <td class="input"><input type="text" name="wifi_ssid" value=")rawliteral" + wifi_ssid + R"rawliteral(" required></td>
+            <td class="hint">Naam van je WiFi netwerk</td>
+          </tr>
+          <tr>
+            <td class="label">WiFi wachtwoord</td>
+            <td class="input"><input type="password" name="wifi_pass" value=")rawliteral" + wifi_pass + R"rawliteral("></td>
+            <td class="hint">Laat leeg om huidige te behouden</td>
+          </tr>
+          <tr>
+            <td class="label">Static IP</td>
+            <td class="input"><input type="text" name="static_ip" value=")rawliteral" + static_ip_str + R"rawliteral(" placeholder="bijv. 192.168.1.50 (leeg = DHCP)"></td>
+            <td class="hint">Leeg = DHCP. Formaat: xxx.xxx.xxx.xxx</td>
+          </tr>
+          <tr>
+            <td class="label">Heating setpoint (default)</td>
+            <td class="input"><input type="number" name="heat_sp" min="10" max="30" value=")rawliteral" + String(heating_setpoint_default) + R"rawliteral("></td>
+            <td class="hint">Standaard verwarmingstemperatuur</td>
+          </tr>
+          <tr>
+            <td class="label">Vent request (default %)</td>
+            <td class="input"><input type="number" name="vent_req" min="0" max="100" value=")rawliteral" + String(vent_request_default) + R"rawliteral("></td>
+            <td class="hint">Standaard ventilatie bij manueel</td>
+          </tr>
+          <tr>
+            <td class="label">Dew safety margin (°C)</td>
+            <td class="input"><input type="number" step="0.1" name="dew_margin" min="0.5" max="5.0" value=")rawliteral" + String(dew_safety_margin, 1) + R"rawliteral("></td>
+            <td class="hint">Veiligheidsmarge boven dauwpunt</td>
+          </tr>
+          <tr>
+            <td class="label">Home mode default</td>
+            <td class="input">
+              <select name="home_mode">
+                <option value="0" )rawliteral" + (home_mode_default == 0 ? "selected" : "") + R"rawliteral(>Uit</option>
+                <option value="1" )rawliteral" + (home_mode_default == 1 ? "selected" : "") + R"rawliteral(>Thuis</option>
+              </select>
+            </td>
+            <td class="hint">Standaard Thuis/Uit modus</td>
+          </tr>
+          <tr>
+            <td class="label">LDR dark threshold</td>
+            <td class="input"><input type="number" name="ldr_dark" min="10" max="100" value=")rawliteral" + String(ldr_dark_threshold) + R"rawliteral("></td>
+            <td class="hint">Waarde waarbij het als "donker" geldt</td>
+          </tr>
+          <tr>
+            <td class="label">Beam alert threshold</td>
+            <td class="input"><input type="number" name="beam_thresh" min="0" max="100" value=")rawliteral" + String(beam_alert_threshold) + R"rawliteral("></td>
+            <td class="hint">Waarde voor beam alarm (0-100)</td>
+          </tr>
+          <tr>
+            <td class="label">Aantal NeoPixels</td>
+            <td class="input"><input type="number" name="pixels" min="1" max="30" value=")rawliteral" + String(pixels_num) + R"rawliteral("></td>
+            <td class="hint">1-30 pixels (reboot nodig na wijzigen)</td>
+          </tr>
+          <tr>
+            <td class="label">Standaard RGB</td>
+            <td class="input" colspan="2">
+              R: <input type="number" name="neo_r" min="0" max="255" value=")rawliteral" + String(neo_r) + R"rawliteral(" style="width:80px;">
+              G: <input type="number" name="neo_g" min="0" max="255" value=")rawliteral" + String(neo_g) + R"rawliteral(" style="width:80px;">
+              B: <input type="number" name="neo_b" min="0" max="255" value=")rawliteral" + String(neo_b) + R"rawliteral(" style="width:80px;">
+            </td>
+          </tr>
+          <tr>
+            <td class="label">Optionele sensoren</td>
+            <td class="input" colspan="2">
+              <label><input type="checkbox" name="co2" )rawliteral" + (co2_enabled ? "checked" : "") + R"rawliteral(> CO₂ (MH-Z19)</label><br>
+              <label><input type="checkbox" name="dust" )rawliteral" + (dust_enabled ? "checked" : "") + R"rawliteral(> Stof (Sharp GP2Y)</label><br>
+              <label><input type="checkbox" name="sun" )rawliteral" + (sun_light_enabled ? "checked" : "") + R"rawliteral(> Zonlicht (TSL2561)</label><br>
+              <label><input type="checkbox" name="mov2" )rawliteral" + (mov2_enabled ? "checked" : "") + R"rawliteral(> MOV2 PIR sensor</label><br>
+              <label><input type="checkbox" name="tstat" )rawliteral" + (tstat_enabled ? "checked" : "") + R"rawliteral(> Hardware thermostaat</label><br>
+              <label><input type="checkbox" name="beam" )rawliteral" + (beam_enabled ? "checked" : "") + R"rawliteral(> Beam sensor (lichtstraal)</label>
+            </td>
+          </tr>
+        </table>
+        <div style="text-align:center;">
+          <button type="submit" class="submit-btn">Opslaan & Reboot</button>
+          <button type="button" class="reset-btn" onclick="if(confirm('Weet je zeker? Alle instellingen worden gewist!')) location.href='/factory_reset';">Factory Reset</button>
+        </div>
+      </form>
+      <script>
+        document.getElementById('settingsForm').onsubmit = function(e) {
+          const ip = this.static_ip.value.trim();
+          if (ip && !/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
+            alert('Ongeldig IP-adres formaat!');
+            e.preventDefault();
+            return false;
+          }
+          if (!this.room_id.value.trim() || !this.wifi_ssid.value.trim()) {
+            alert('Room naam en WiFi SSID zijn verplicht!');
+            e.preventDefault();
+            return false;
+          }
+          return confirm('Instellingen opslaan? De controller zal rebooten.');
+        };
+      </script>
+    </div>
+  </div>
+</body>
+</html>
+)rawliteral";
+
+  request->send(200, "text/html; charset=utf-8", html);
+});
+
+
+// === SAVE SETTINGS ===
+server.on("/save_settings", HTTP_GET, [](AsyncWebServerRequest *request) {
+  auto arg = [&](const char* n, const String& d="") {
+    return request->hasArg(n) ? request->arg(n) : d;
+  };
+
+  // Basisinstellingen
+  preferences.putString(NVS_ROOM_ID, arg("room_id", room_id));
+  preferences.putString(NVS_WIFI_SSID, arg("wifi_ssid", wifi_ssid));
+  preferences.putString(NVS_WIFI_PASS, arg("wifi_pass", wifi_pass));
+  preferences.putString(NVS_STATIC_IP, arg("static_ip", ""));
+
+  preferences.putInt(NVS_HEATING_SETPOINT, arg("heat_sp","20").toInt());
+  preferences.putInt(NVS_VENT_REQUEST, arg("vent_req","0").toInt());
+  preferences.putFloat(NVS_DEW_MARGIN, arg("dew_margin","2.0").toFloat());
+  preferences.putInt(NVS_HOME_MODE, arg("home_mode","0").toInt());
+  preferences.putInt(NVS_LDR_DARK, arg("ldr_dark","50").toInt());
+  preferences.putInt(NVS_BEAM_THRESHOLD, arg("beam_thresh","50").toInt());
+
+  // Checkboxes betrouwbaar
+  preferences.putBool(NVS_CO2_ENABLED, request->hasArg("co2"));
+  preferences.putBool(NVS_DUST_ENABLED, request->hasArg("dust"));
+  preferences.putBool(NVS_SUN_ENABLED, request->hasArg("sun"));
+  preferences.putBool(NVS_MOV2_ENABLED, request->hasArg("mov2"));
+  preferences.putBool(NVS_TSTAT_ENABLED, request->hasArg("tstat"));
+  preferences.putBool(NVS_BEAM_ENABLED, request->hasArg("beam"));
+
+  // NeoPixels
+  preferences.putInt(NVS_PIXELS_NUM, arg("pixels","8").toInt());
+  preferences.putUChar(NVS_NEO_R, arg("neo_r","255").toInt());
+  preferences.putUChar(NVS_NEO_G, arg("neo_g","255").toInt());
+  preferences.putUChar(NVS_NEO_B, arg("neo_b","255").toInt());
+
+  request->send(200, "text/html",
+    "<h2 style='text-align:center;padding:50px;color:#336699;'>Instellingen opgeslagen!<br>Rebooting...</h2>");
+  delay(800);
+  ESP.restart();
+});
+
+
+
+
+
+  // === FACTORY RESET VIA WEB ===
+  server.on("/factory_reset", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/html", "<h2 style='color:#f00'>Factory reset uitgevoerd!<br>Rebooting...</h2>");
+    preferences.clear();
+    delay(1000);
+    ESP.restart();
+  });
+
+
+
   // === SET COLOR HANDLER ===
   server.on("/setcolor", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (request->hasParam("r")) neo_r = request->getParam("r")->value().toInt();
-    if (request->hasParam("g")) neo_g = request->getParam("g")->value().toInt();
-    if (request->hasParam("b")) neo_b = request->getParam("b")->value().toInt();
-
-  // Beperk waarden tot 0-255
-  neo_r = constrain(neo_r, 0, 255);
-  neo_g = constrain(neo_g, 0, 255);
-  neo_b = constrain(neo_b, 0, 255);
-  request->send(200, "text/plain", "OK");
+    if (request->hasParam("r")) {
+      neo_r = constrain(request->getParam("r")->value().toInt(), 0, 255);
+      preferences.putUChar(NVS_NEO_R, neo_r);
+    }
+    if (request->hasParam("g")) {
+      neo_g = constrain(request->getParam("g")->value().toInt(), 0, 255);
+      preferences.putUChar(NVS_NEO_G, neo_g);
+    }
+    if (request->hasParam("b")) {
+      neo_b = constrain(request->getParam("b")->value().toInt(), 0, 255);
+      preferences.putUChar(NVS_NEO_B, neo_b);
+    }
+    request->send(200, "text/plain", "OK");
   });
+
+
 
 
   // Handler voor Instelbare fade duration (slider)
   server.on("/set_fade_duration", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (request->hasParam("duration")) {
-      fade_duration = request->getParam("duration")->value().toInt();
-      fade_duration = constrain(fade_duration, 1, 10);
-      updateFadeInterval();  // Herbereken de fade-interval direct
-    }
-    request->send(200, "text/plain", "OK");
+  if (request->hasParam("duration")) {
+    fade_duration = request->getParam("duration")->value().toInt();
+    fade_duration = constrain(fade_duration, 1, 10);
+    preferences.putInt(NVS_FADE_DURATION, fade_duration);  // direct opslaan
+    updateFadeInterval();
+  }
+  request->send(200, "text/plain", "OK");
   });
-
 
 
   // Slider Heating setpoint (wijzig alleen setpoint, geen mode-switch)
   server.on("/set_setpoint", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (request->hasParam("setpoint")) {
-      heating_setpoint = request->getParam("setpoint")->value().toInt();
-      heating_setpoint = constrain(heating_setpoint, 10, 30);
-    }
-    request->send(200, "text/plain", "OK");
+  if (request->hasParam("setpoint")) {
+    heating_setpoint = request->getParam("setpoint")->value().toInt();
+    heating_setpoint = constrain(heating_setpoint, 10, 30);
+    preferences.putInt(NVS_CURRENT_SETPOINT, heating_setpoint);  // direct opslaan
+  }
+  request->send(200, "text/plain", "OK");
   });
 
 
@@ -920,11 +1499,23 @@ void setup() {
     request->send(200, "text/plain", "OK");
   });
 
+  // Toggle Thuis/Uit
+  server.on("/toggle_home", HTTP_GET, [](AsyncWebServerRequest *request) {
+    home_mode = 1 - home_mode; // Toggle tussen 0 en 1
+    preferences.putInt(NVS_HOME_MODE_STATE, home_mode);  // direct opslaan
+    request->send(200, "text/plain", "OK");
+  });
 
+  Serial.println("Commando: typ 'reset_nvs' in serial monitor voor factory reset");
 
   // Afsluiting webserver (alle handlers hiervoor!)
+
+
+
+
+
   server.begin();
-  Serial.println("HTTP server gestart – http://testroom.local");
+  Serial.printf("HTTP server gestart – http://%s.local of http://%s\n", mdns_name.c_str(), WiFi.localIP().toString().c_str());
 }
 
 unsigned long lastSerial = 0;
@@ -935,6 +1526,8 @@ unsigned long last_slow = 0;
 
 
 void loop() {
+
+  handleSerialCommands();
 
   updateFades();
 
@@ -956,7 +1549,7 @@ void loop() {
 
 
   // NeoPixel aansturing per pixel
-  for (int i = 0; i < NEOPIXEL_NUM; i++) {
+  for (int i = 0; i < pixels_num; i++) {
     if (i < 2) {  // Pixel 0 en 1: speciale logica
       if (bed == 1) {
         // Bed AAN: alles uit, geen PIR, reset mode naar AUTO
@@ -1030,12 +1623,19 @@ void loop() {
 
 
 
-  // Heating logica (slider wijzigt setpoint, geen mode-switch)
-  if (heating_mode == 0) {  // AUTO
-    heating_on = (room_temp < (heating_setpoint - 0.5)) ? 1 : 0;  // Hysteresis
-  } else {  // MANUEEL
-    heating_on = 1;  // Altijd aan
+  // Heating logica met Thuis/Uit + anti-condens (slider wijzigt setpoint, geen mode-switch)
+  float effective_setpoint = max((float)heating_setpoint, dew + dew_safety_margin);
+
+  if (heating_mode == 1) {  // MANUEEL
+    heating_on = 1;  // Altijd aan, ongeacht Thuis/Uit
+  } else {  // AUTO
+    if (home_mode == 1) {  // Thuis → volg hardware thermostaat
+      heating_on = tstat_on;
+    } else {  // Uit → ESP regelt met anti-condens bescherming
+      heating_on = (room_temp < (effective_setpoint - 0.5f)) ? 1 : 0;
+    }
   }
+
 
   // Ventilation logica (slider zet mode = 1)
   if (vent_mode == 0) {  // AUTO
@@ -1047,12 +1647,18 @@ void loop() {
   mov1_triggers = countRecent(mov1Times, MOV_BUF_SIZE);
   mov2_triggers = countRecent(mov2Times, MOV_BUF_SIZE);
 
-  // Serial rapport (identiek)
-  if (millis() - lastSerial > 3000) {
+  // Serial rapport (wacht tot wifi ok)
+    if (!ap_mode_active && millis() - lastSerial > 3000) {
     lastSerial = millis();
 
-    Serial.println("\nTESTROOM – " + String(uptime_sec) + " s");
-    Serial.println("─────────────────────────────────────");
+    String upper_room = room_id;           // Kopieer de room_id
+    upper_room.toUpperCase();              // Maak alles hoofdletters (bijv. "woonkamer" → "WOONKAMER")
+    Serial.println("\n" + upper_room + " – " + String(uptime_sec) + " s");
+    String divider = "";
+    for (int i = 0; i < upper_room.length() + String(uptime_sec).length() + 12; i++) {
+      divider += "─";
+    }
+    Serial.println(divider);
     Serial.printf("DHT22 Temp2          : %.2f °C\n", temp_dht);
     Serial.printf("DHT22 Humidity       : %.1f %%\n", humi);
     Serial.printf("Dauwpunt             : %.1f °C\n", dew);
@@ -1061,6 +1667,8 @@ void loop() {
     Serial.printf("Room temp            : %.1f °C %s\n", room_temp, temp_melding.c_str());
     Serial.printf("Heating setpoint     : %d °C\n", heating_setpoint);
     Serial.printf("Heating mode         : %s\n", heating_mode == 0 ? "AUTO" : "MANUEEL");
+    Serial.printf("Thuis/Uit modus      : %s\n", home_mode ? "Thuis" : "Uit");
+    Serial.printf("Effective setpoint   : %.1f °C\n", effective_setpoint);
     Serial.printf("Heating aan          : %s\n", heating_on ? "JA" : "NEE");
     Serial.printf("TSTAT aan (wired)    : %s\n", tstat_on ? "JA" : "NEE");
     Serial.printf("Stof (Sharp)         : %d\n", dust);
@@ -1080,13 +1688,14 @@ void loop() {
     Serial.printf("NeoPixel RGB         : %d, %d, %d\n", neo_r, neo_g, neo_b);
     Serial.printf("Dim snelheid (s)     : %d s\n", fade_duration);
     Serial.printf("Fade interval        : %lu ms\n", fade_interval_ms);  // Debug toegevoegd
-    Serial.print("Pixel modes (0-1)    : ");
-    Serial.printf("%d, %d\n", pixel_mode[0], pixel_mode[1]);
-    Serial.print("Pixels on (0-7)      : ");
-      for (int i = 0; i < NEOPIXEL_NUM; i++) {
-        Serial.print(pixel_on[i] ? "1" : "0");
-        if (i < 7) Serial.print(", ");
-      }
+    Serial.print("Pixel modes (MOV1,MOV2) : ");
+    Serial.print(pixel_mode[0]);
+    Serial.print(", ");
+    Serial.println(pixel_mode[1]);
+    Serial.print("Pixels on (0-" + String(pixels_num-1) + ") : ");
+    for (int i = 0; i < pixels_num; i++) {
+      Serial.print(pixel_on[i] ? "1" : "0");
+    }
     Serial.println();
     Serial.printf("WiFi RSSI            : %d dBm\n", WiFi.RSSI());
     Serial.printf("WiFi kwaliteit       : %d %%\n", constrain(2 * (WiFi.RSSI() + 100), 0, 100));
