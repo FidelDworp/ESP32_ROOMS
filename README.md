@@ -18,27 +18,21 @@ Persistent gemaakt (na power-off/on reboot):
   - heating_setpoint (huidige gekozen temperatuur)
   - fade_duration (dim-snelheid 1-10s)
   - home_mode (Thuis/Uit)
+Keuze van Optional sensors (6) in /settings bepaalt welke related data getoond worden in UI, Serial en Matter. (JSON toont alles, altijd)
 Andere states vallen bewust terug naar defaults bij reboot (vent_percent AUTO, pixels uit/AUTO, heating_mode AUTO, vent_mode AUTO)
 Alle andere functionaliteit intact: OTA, JSON endpoint, NeoPixel kleurkiezer, sliders/toggles met live update, serial output, etc.
-**Nog te doen (prioriteit zoals jij aangaf):**
 
+**Hoe verder:**
+OP sensors ook uitgeschakeld in Matter!
 
-**Optionele sensoren verbergen in UI**
-   - Als een sensor uitgeschakeld is in /settings:
-     - **Niet meer tonen** in de web statuspagina (/) – verwijder de rij uit de tabel
-     - **Niet meer printen** in de seriële output (geen regel in het rapport)
-     - **Wel blijven sturen** in /status.json (voor Matter/Home Assistant integratie)
-   - Betreft: CO₂, Dust, Zonlicht (TSL2561), Beam waarde/alert
-**Eventuele nice-to-haves (later beslissen):**
+**Eventuele nice-to-haves:**
    - Bed-switch en andere persistent states ook beschikbaar maken in Matter (als je dat verder uitbreidt)
    - Mogelijk een /reset_runtime endpoint om persistente states te wissen zonder factory reset
    - Verbeterde foutafhandeling bij sensoren (bijv. "sensor defect" melding in UI)
+
 **Belangrijke technische keuzes (ter info voor continuïteit):**
-
-
 NVS wordt gebruikt voor alle permanente instellingen
 Checkboxes werken via method="get" + hasArg("naam") → simpel en betrouwbaar
 Runtime persistent states: bed, heating_setpoint, fade_duration, home_mode
 Veiligheid: kritieke automatische systemen (vent, pixels, heating/vent mode) vallen terug naar defaults bij reboot
 Web UI: mooie stijl met R"rawliteral()", sidebar, responsive table
-**Hoe verder:**
