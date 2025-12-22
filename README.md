@@ -38,6 +38,7 @@
 - Web UI gebouwd met R"rawliteral()", responsive tables, conditionele HTML via `if (xxx_enabled)`
 
 **Nog te doen**
+- "captive portal" realiseren: standaard bij veel devices (zoals Sonoff of Tasmota). Na connect met AP, opent device automatisch een popup met de config pagina (/settings). Je kan direct configureren!
 - Met de nieuwe ESP32-R6 controllers: Optionele sensoren ook uitschakelen in Matter-exposure
 - Maakt de configuratie via /settings écht volledig – wat je daar uitzet, verdwijnt overal (UI, serial én HomeKit/Matter).
 - Momenteel toont Matter altijd alles via JSON → bij uitschakelen in /settings moeten de bijbehorende entities verdwijnen of als "unavailable" gemarkeerd worden)
