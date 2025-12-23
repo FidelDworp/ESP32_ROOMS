@@ -6,6 +6,9 @@
   - Room naam, WiFi SSID/pass, static IP
   - HVAC defaults (heating setpoint default, vent request default, dew margin, home mode default, LDR dark threshold, beam alert threshold)
   - Optionele sensoren in of uitschakelen (checkboxes: CO₂, Stof, Zonlicht, MOV2 PIR, Hardware thermostaat, Beam sensor) => Opgepast: Dit is een zéér kwetsbare aanpak met "rawliteral"! Opgepast bij wijzigingen! Check altijd dat de "rawliteral" structuur niet gebroken wordt!
+  - TO DO: De "nicknames" voor optionele sensors
+- Captive Portal functionaliteit toegevoegd (ChatGPT): De AP-mode is nu veel professioneler en gebruiksvriendelijker. Na connect met AP, opent device automatisch een popup met de config pagina (/settings). Je kan direct configureren! (Standaard bij veel devices zoals Sonoff of Tasmota).
+
   
 **persistent na reboot**
   - NeoPixel defaults (aantal pixels 1-30, RGB)
@@ -41,8 +44,7 @@
 1. Verbeterde foutafhandeling bij sensoren (Bijv. als een sensor defect is, geen waarde meet, of niet aangesloten: Toon in de web UI & serial "sensor defect" of "niet beschikbaar" i.p.v. 0 of rare waarden, hetzelfde in seriële output. Voorbeeld: DS18B20 defect → backup DHT22, en als beide falen duidelijke melding
   - Voorbeeld: DS18B20 defect → backup DHT22, en als beide falen duidelijke melding
   - CO₂, Dust, TSL2561, Beam, etc. krijgen een "defect" detectie
-2. "captive portal" realiseren: standaard bij veel devices (zoals Sonoff of Tasmota). Na connect met AP, opent device automatisch een popup met de config pagina (/settings). Je kan direct configureren!
-3. Met de nieuwe ESP32-R6 controllers: Optionele sensoren ook uitschakelen in Matter-exposure
+2. Met de nieuwe ESP32-R6 controllers: Optionele sensoren ook uitschakelen in Matter-exposure
 => Maakt de configuratie via /settings écht volledig: Wat je daar uitzet, verdwijnt overal (UI, serial én HomeKit/Matter). Momenteel toont Matter altijd alles via JSON. Bij uitschakelen in /settings moeten de bijbehorende entities verdwijnen of als "unavailable" gemarkeerd worden)
 
 **Eventuele nice-to-haves**
@@ -189,22 +191,10 @@ IP print in setup() nog op WiFi.localIP() (0.0.0.0 in AP-mode), maar niet kritie
 
 Wat is NIET veranderd (goed nieuws!)
 
-Geen sensor nicknames code toegevoegd → we blijven clean.
-Geen wijzigingen aan rawliteral HTML in / of /settings → checkboxes, sliders, live update blijven 100% intact.
-Static IP default nog "192.168.xx.xx" → dit is nog steeds een potentieel probleem (zoals ChatGPT eerder zei), maar niet gefixt in deze versie.
-Geen skip van sensor reads in AP-mode → pulseIn() kan nog blocking zijn en reboot veroorzaken bij pagina laden (jouw huidige probleem).
+- Geen sensor nicknames code toegevoegd → we blijven clean.
+- Geen wijzigingen aan rawliteral HTML in / of /settings → checkboxes, sliders, live update blijven 100% intact.
+- Static IP default nog "192.168.xx.xx" → dit is nog steeds een potentieel probleem (zoals ChatGPT eerder zei), maar niet gefixt in deze versie.
 
-Samenvatting van de status
-
-Uitstekende captive portal implementatie. De AP-mode is nu veel professioneler en gebruiksvriendelijker.
-
-Maar ik denk dat jouw huidige reboot-probleem bij het openen van http://192.168.4.1/settings nog niet is opgelost, omdat: Sensor reads (vooral pulseIn() in readCO2()) nog steeds draaien in AP-mode. Deze blokkeren de CPU → AsyncWebServer krijgt geen tijd → watchdog reset.
-=> Sensor reads skippen in AP-mode (kleine, veilige wijziging in loop())
-
-Aanbeveling voor volgende stap
-
-Goede basis om verder op te bouwen. (captive portal werkt!).
-
-Nog één ding fixen: sensor reads skippen in AP-mode (zoals ik eerder voorstelde), zodat de webserver altijd responsief blijft.
-
-Daarna: sensor nicknames!
+CHECK:
+- Geen skip van sensor reads in AP-mode → pulseIn() kan nog blocking zijn en reboot veroorzaken bij pagina laden (jouw huidige probleem). Huidige reboot-probleem bij het openen van http://192.168.4.1/settings nog niet is opgelost, omdat: Sensor reads (vooral pulseIn() in readCO2()) nog steeds draaien in AP-mode. Deze blokkeren de CPU → AsyncWebServer krijgt geen tijd → watchdog reset.
+=> Sensor reads skippen in AP-mode (kleine, veilige wijziging in loop()) zodat de webserver altijd responsief blijft.
