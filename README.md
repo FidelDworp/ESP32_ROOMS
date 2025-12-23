@@ -131,3 +131,80 @@ Werkwijze:
 - Géén volledige HTML blokken herschrijven indien niet nodig! Indien wel, opgepast voor de "checkboxes" Extra voorzichtigheid bij rawliteral HTML! Na elke HTML wijziging: testen op mobiel (iPhone) of toggles/sliders nog reageren.
 - Na elke stap: testen! Pas daarna volgende stap
 => Werk rustig, één stap per keer, met goedkeuring vóór elke volgende code wijziging.
+
+Grok verprutste dit werk, dus gaf ik het door aan ChatGPT:
+
+--------------
+
+Vergelijking door Grok tussen versie van 22dec25 door Grok en versie van 23dec25 door ChatGPT.
+
+Belangrijke en goede verbeteringen om de AP-mode (fallback bij geen WiFi) veel robuuster en gebruiksvriendelijker te maken.
+
+1. Captive Portal functionaliteit toegevoegd (grote verbetering!)
+   
+Dit is de belangrijkste toevoeging – precies wat je wilde: automatisch de config-pagina openen op iPhone/Android na verbinding met de AP.
+
+Nieuwe include: #include <DNSServer.h>
+Globals toegevoegd:
+DNSServer dnsServer;
+const byte DNS_PORT = 53;
+bool mdns_running = false; (voor betere mDNS handling)
+wl_status_t last_wifi_status = WL_IDLE_STATUS; (voor WiFi status detectie)
+
+In setup() – AP blok:
+Na WiFi.softAPConfig(...):
+dnsServer.start(DNS_PORT, "*", ap_ip);
+Extra serial prints voor duidelijkheid.
+ap_mode_active = true; (duplicaat, maar harmless).
+
+In loop():
+Nieuwe WiFi status detectie + mDNS herstart bij connect/disconnect (zeer netjes!).
+if (ap_mode_active) { dnsServer.processNextRequest(); } → dit houdt de DNS server draaiende.
+
+In /settings handler (bovenaan):
+Nieuwe handlers voor captive portal detectie:
+/hotspot-detect.html → redirect naar /settings (iOS/macOS)
+/generate_204 → redirect (Android)
+/ncsi.txt → redirect (Windows)
+
+Resultaat: Na verbinding met "ROOM-Testroom" opent iPhone/Android automatisch een popup met http://192.168.4.1/settings. Geen handmatig IP typen meer nodig!
+
+2. Verbeterde mDNS handling
+
+mDNS wordt nu alleen gestart bij geldige STA-verbinding.
+Bij WiFi disconnect wordt mDNS gestopt.
+Bij reconnect wordt mDNS opnieuw gestart.
+Voorkomt conflicten in AP-mode en maakt reconnects stabieler.
+
+3. Serial output verbeteringen in AP-mode
+
+Duidelijkere meldingen bij AP start.
+Extra regel "AP-mode actief → webserver en DNS blijven actief".
+"DNS captive portal actief (alle domeinen → 192.168.4.1)".
+
+4. Kleine clean-ups
+
+ap_mode_active = true; twee keer gezet (geen probleem).
+IP print in setup() nog op WiFi.localIP() (0.0.0.0 in AP-mode), maar niet kritiek.
+
+Wat is NIET veranderd (goed nieuws!)
+
+Geen sensor nicknames code toegevoegd → we blijven clean.
+Geen wijzigingen aan rawliteral HTML in / of /settings → checkboxes, sliders, live update blijven 100% intact.
+Static IP default nog "192.168.xx.xx" → dit is nog steeds een potentieel probleem (zoals ChatGPT eerder zei), maar niet gefixt in deze versie.
+Geen skip van sensor reads in AP-mode → pulseIn() kan nog blocking zijn en reboot veroorzaken bij pagina laden (jouw huidige probleem).
+
+Samenvatting van de status
+
+Uitstekende captive portal implementatie. De AP-mode is nu veel professioneler en gebruiksvriendelijker.
+
+Maar ik denk dat jouw huidige reboot-probleem bij het openen van http://192.168.4.1/settings nog niet is opgelost, omdat: Sensor reads (vooral pulseIn() in readCO2()) nog steeds draaien in AP-mode. Deze blokkeren de CPU → AsyncWebServer krijgt geen tijd → watchdog reset.
+=> Sensor reads skippen in AP-mode (kleine, veilige wijziging in loop())
+
+Aanbeveling voor volgende stap
+
+Goede basis om verder op te bouwen. (captive portal werkt!).
+
+Nog één ding fixen: sensor reads skippen in AP-mode (zoals ik eerder voorstelde), zodat de webserver altijd responsief blijft.
+
+Daarna: sensor nicknames!
