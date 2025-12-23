@@ -1,3 +1,5 @@
+### 📄 `README.md`
+
 # ESP32 Testroom Controller
 
 **Project README – status december 2025**
