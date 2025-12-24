@@ -119,10 +119,13 @@ Bij JLCPCB vind ik deze Espressif module "esp32-c6-devkitc-1-n8" maar de pin lay
 
 Varianten:
 
-1) Officiele module van Espressif: "esp32-c6-devkitc-1-n8" (2x 16p)
+1) Officiele module van Espressif: "ESP32-C6-devkitc-1-n8" (2x 16p)
 https://jlcpcb.com/partdetail/21893411-ESP32_C6_DEVKITC_1N8/C20554022
 
-2) Modules die ik kocht: ???
+2) Modules die ik kocht: "ESP32-C6-WROOM-1-N8" of "ESP32-C6-WROOM-1-N16" Development Board by Dorhea
+https://www.amazon.com/dp/B0DKF4NQHC   => VIDEO: https://youtu.be/LyMUUUmBnLI
+
+
 
 
 ----------------
