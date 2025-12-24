@@ -39,35 +39,31 @@ Externe antenne vs interne (ESP32-C6):
 	
 Welke soorten antennes kan men met de C6 gebruiken?
 
-	Interne PCB-antenne (standaard op ESP32-C6-WROOM-1).
-	Externe antenne (via U.FL/IPEX-connector op varianten zoals WROOM-1U/Mini-1U; types: monopole, dipole, rubber duck).
-	Software/hardware switching (op sommige boards, via GPIO’s).
-	Multi-antenne (tot 16 externe via switches, voor diversity).
+- Interne PCB-antenne (standaard op ESP32-C6-WROOM-1).
+- Externe antenne (via U.FL/IPEX-connector op varianten zoals WROOM-1U/Mini-1U; types: monopole, dipole, rubber duck).
+- Software/hardware switching (op sommige boards, via GPIO’s).
+- Multi-antenne (tot 16 externe via switches, voor diversity).
 	
 Van onze oude ESP32 => C6 software:
 
-De aangepaste sketch in Arduino IDE gebruiken we als basis voor Matter over WiFi op ESP32-C6.
-Arduino-ESP32 core (versie 3.x) ondersteunt Matter over WiFi via de ingebouwde Matter library en examples (bijv. light, on/off device).
-
-Matter over Thread werkt niet volledig in pre-compiled Arduino core (vereist rebuild of ESP-IDF component).
-	Je hoeft geen andere tool (zoals ESP-IDF) – blijf in Arduino IDE, voeg Matter examples toe en integreer in je code.
-	Update core naar latest voor beste support.
+- De aangepaste sketch in Arduino IDE gebruiken we als basis voor Matter over WiFi op ESP32-C6.
+- Arduino-ESP32 core (versie 3.x) ondersteunt Matter over WiFi via de ingebouwde Matter library en examples (bijv. light, on/off device).
+- Matter over Thread werkt niet volledig in pre-compiled Arduino core (vereist rebuild of ESP-IDF component).
+- Je hoeft geen andere tool (zoals ESP-IDF) – blijf in Arduino IDE, voeg Matter examples toe en integreer in je code.
+- Update core naar latest voor beste support.
 	
 Matter over Wi-Fi op ESP32-C6:
 
-Matter is een universele smart home-standaard voor interoperabiliteit. Bosch Smart Home
-“Matter over Wi-Fi” betekent dat je apparaten via Wi-Fi in plaats van mesh-netwerk communiceren. ESP32 Tutorials
-De ESP32-C6 ondersteunt Wi-Fi en Thread, dus hij is perfect geschikt voor Matter-apparaten. IoT Assistant
-Als je zo’n apparaat maakt, kan het direct met Apple Home werken zonder aparte bridge (mits certificering/compatibiliteit). iCulture
+- Matter is een universele smart home-standaard voor interoperabiliteit.
+- “Matter over Wi-Fi” betekent dat je apparaten via Wi-Fi in plaats van mesh-netwerk communiceren. ESP32 Tutorials
+- De ESP32-C6 ondersteunt Wi-Fi en Thread, dus hij is perfect geschikt voor Matter-apparaten. IoT Assistant
+- Als je zo’n apparaat maakt, kan het direct met Apple Home werken zonder aparte bridge (mits certificering/compatibiliteit).
 
 ---------------
 
-**echt gebruikersproject met een ESP32-C6 module op een PCB die je kunt laten produceren**
-en wat nuttige context over dit soort modules in productiescenario’s:
-
----
-
 ## Voorbeeldproject van een ESP32-C6 PCB-ontwerp
+
+Gebruikersproject met een ESP32-C6 module op een PCB die je kunt laten produceren, en wat nuttige context over dit soort modules in productiescenario’s:
 
 ### **ESP32-C6 dev board (door user, met PCBWay productie)**
 
