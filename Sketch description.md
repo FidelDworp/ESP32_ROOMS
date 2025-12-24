@@ -1,4 +1,6 @@
-## High-level samenvatting
+## TESTROOM.ino - High-level samenvatting
+
+Deze samenvatting is bedoeld als functionele documentatie voor de GitHub-repository en beschrijft **wat** de sketch doet en **waarom**, niet de volledige implementatiedetails per functie.
 
 1. **Bedoeling van de sketch**
    De sketch implementeert een ESP32-gebaseerde room controller voor een testopstelling, als opvolger van een Photon-gebaseerd systeem. Ze combineert netwerkconfiguratie, persistente instellingen, sensoringang, actuator-/pixelsturing en een webinterface (inclusief captive portal) in één geïntegreerd geheel.
@@ -140,5 +142,3 @@ Sensorwaarden worden:
   * Netwerk en UI
 
 ---
-
-Deze samenvatting is bedoeld als functionele documentatie voor de GitHub-repository en beschrijft **wat** de sketch doet en **waarom**, niet de volledige implementatiedetails per functie.
