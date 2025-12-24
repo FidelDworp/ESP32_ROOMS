@@ -125,6 +125,8 @@ https://jlcpcb.com/partdetail/21893411-ESP32_C6_DEVKITC_1N8/C20554022
 2) Modules die ik kocht: "ESP32-C6-WROOM-1-N8" of "ESP32-C6-WROOM-1-N16" Development Board by Dorhea
 https://www.amazon.com/dp/B0DKF4NQHC   => VIDEO: https://youtu.be/LyMUUUmBnLI
 
+Espressif product selector: https://products.espressif.com/#/product-selector?names=ESP32-C6-WROOM-1-N8
+
 
 
 
