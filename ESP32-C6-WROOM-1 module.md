@@ -73,6 +73,8 @@ en wat nuttige context over dit soort modules in productiescenario’s:
 
 Er is een open project online waarin een hobby-ontwerper een **ESP32-C6-gebaseerde PCB zelf heeft ontworpen en via PCBWay heeft geproduceerd**.
 
+https://fritzenlab.net/fritzenlab-esp32-c6-dev-board/
+
 De maker beschrijft dat hij:
 
 * het **ESP32-C6 Xiao-module** (met geïntegreerde antenne en flash) als kern gebruikt,
