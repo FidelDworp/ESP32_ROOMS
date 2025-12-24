@@ -69,6 +69,9 @@ Gebruikersproject met een ESP32-C6 module op een PCB die je kunt laten producere
 
 Er is een open project online waarin een hobby-ontwerper een **ESP32-C6-gebaseerde PCB zelf heeft ontworpen en via PCBWay heeft geproduceerd**.
 
+JLCPCB module ESP32_C6_WROOM_1N4:
+https://jlcpcb.com/partdetail/ESPRESSIFINC-ESP32_C6_WROOM_1N4/C6034714
+
 Project:
 https://fritzenlab.net/fritzenlab-esp32-c6-dev-board/
 
