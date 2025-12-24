@@ -175,11 +175,3 @@ Voeg DIRECT NA deze regel toe:
 ---
 
 **EINDE — AI_CONTEXT_MIN.md**
-
----
-
-Dit is ongeveer het **minimum** dat een LLM nodig heeft om zich correct te gedragen.
-Als je wil, kan ik nu ook:
-
-* een **machine-checkbare checklist** maken (ja/nee-regels), of
-* een **“reject template”** waarmee je AI-antwoorden meteen kan afkeuren.
