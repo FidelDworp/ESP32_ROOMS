@@ -1,4 +1,5 @@
-📄 KNOWN_ISSUES.md
+📄 To do & Known Issues.md
+
 ESP32 Testroom Controller
 
 Bekende problemen & technische schuld
