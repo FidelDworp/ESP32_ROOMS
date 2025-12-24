@@ -75,6 +75,7 @@ Er is een open project online waarin een hobby-ontwerper een **ESP32-C6-gebaseer
 
 Project:
 https://fritzenlab.net/fritzenlab-esp32-c6-dev-board/
+
 Development:
 https://fritzenlab.net/2024/06/10/develop-a-circuit-board-esp32-c6/
 
