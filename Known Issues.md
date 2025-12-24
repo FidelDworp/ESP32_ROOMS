@@ -1,0 +1,90 @@
+📄 KNOWN_ISSUES.md
+Bekende problemen & technische schuld
+ESP32 Testroom Controller
+
+1. Actuele kritische problemen
+1.1 Sensor reads in AP-mode
+Status: ❌ Niet opgelost
+
+
+pulseIn() blokkeert
+
+
+Webserver starvation
+
+
+Watchdog resets bij /settings
+
+
+Vastgelegde oplossing:
+
+
+Sensor reads conditioneel uitschakelen in AP-mode
+
+
+
+1.2 Safari captive portal gedrag
+
+
+Onvoorspelbaar
+
+
+Soms manuele refresh nodig
+
+
+➡️ Geen bug, aanvaard gedrag
+
+2. Historische fouten (lessons learned)
+
+
+Ongeldige static IP defaults
+
+
+Lange delay() in setup()
+
+
+ESP32 core v3.x watchdog-gevoeligheid
+
+
+
+3. Volgende veilige stap
+
+Sensor reads volledig uitschakelen in AP-mode
+
+Daarna pas:
+
+
+sensor defect-detectie
+
+
+sensor nicknames
+
+
+Matter-koppeling
+
+
+extra endpoints
+
+
+
+Slotopmerking
+Dit geheel vormt nu een juridisch-achtig contract tussen jou en elke AI:
+
+
+ondubbelzinnig
+
+
+afdwingbaar
+
+
+regressiebestendig
+
+
+Als je wil, kan ik in een volgende stap ook nog:
+
+
+een ultrakorte “one-screen AI-prompt” maken, of
+
+
+dit herleiden tot een checklist die je vóór elke AI-sessie afvinkt.
+
