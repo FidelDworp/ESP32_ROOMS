@@ -116,13 +116,6 @@ Voeg DIRECT NA deze regel toe:
 
 ---
 
-## Historiek Grok → ChatGPT
-
-* Grok = instabiele evolutie
-* ChatGPT-versie = 23 dec 2025
-
----
-
 ## Correct verbeterd
 
 * Captive portal (DNS hijack + OS-detectie)
@@ -133,7 +126,6 @@ Voeg DIRECT NA deze regel toe:
 
 ## Bewust NIET aangepast
 
-* Geen sensor nicknames
 * Geen rawliteral HTML-wijzigingen
 * Geen refactors
 
