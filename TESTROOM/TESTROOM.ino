@@ -5,8 +5,13 @@
 // 21dec25 23:00 Pixel nicknames werken VOLLEDIG in /settings en in / (hoofdpagina)! Ga terug naar deze versie als je vastloopt!
 // 22dec25 18:00 Begonnen met volgend plan: "Sensor nicknames" maken naar analogie met pixel nicknames.
 //               Eerste code wijzigingen hebben iets gebroken! We beginnen dus opnieuw van de code van 21dec25 om 2300.
-//         20:30 chatGPT: Uploaded TESTROOM.ino => Captive portal geimplementeerd en gans factory reset proces verbeterd! Thuis testen.
-// 23dec25 ????? chatGPT: Laatste stap afwerken: Correcte serial monitor logging...
+//         20:30 chatGPT: Uploaded TESTROOM.ino => Captive portal geimplementeerd en gans factory reset proces verbeterd! Thuis getest, werkt nog niet.
+// 30dec25 Pixels persistent gemaakt! (voor Mireille) Maar de UI labels van pixel 0 & 1 worden niet geupdated, tenzij ze refreshed worden! Try again!
+
+// Volgende opdrachten voor Grok of chatGPT: 
+//                1) Captive portal en gans factory reset proces verbeteren! Thuis testen! Werkt nog niet goed...
+//                2) Correcte serial monitor logging bij opstarten...
+
 
 
 #include <WiFi.h>
@@ -68,6 +73,10 @@ const char* NVS_CURRENT_SETPOINT    = "curr_setpoint";   // int: huidige gekozen
 const char* NVS_FADE_DURATION       = "fade_duration";   // int: dim-snelheid in seconden (1-10)
 const char* NVS_HOME_MODE_STATE     = "home_mode_state"; // int: 0 = Uit, 1 = Thuis
 const char* NVS_PIXEL_NICK_BASE     = "pixel_nick_";     // Pixel nicknames: keys "pixel_nick_0" t/m "pixel_nick_29"
+const char* NVS_PIXEL_ON_BASE       = "pixel_on_";       // Voor pixel_on[0..29]
+const char* NVS_PIXEL_USER_ON_BASE  = "pixel_user_on_";  // Voor pixel_user_on[0..29]
+const char* NVS_PIXEL_MODE_0        = "pixel_mode_0";    // AUTO/MANUEEL voor MOV1
+const char* NVS_PIXEL_MODE_1        = "pixel_mode_1";    // AUTO/MANUEEL voor MOV2 (alleen als mov2_enabled)
 
 
 
@@ -111,6 +120,7 @@ bool mov2_enabled  = true;
 bool tstat_enabled = true;
 bool beam_enabled  = true;
 int pixels_num     = 8;     // Default. Configureerbaar via NVS (1-30)
+int num_mov_pixels = 2;     // Wordt in setup() aangepast op basis van mov2_enabled
 
 
 // AP mode (Access Point)
@@ -153,9 +163,9 @@ uint8_t neo_b = 255;       // Voor u: B waarde (hardcoded 255)
 
 // Pixel specifieke arrays
 int pixel_mode[2] = {0, 0};  // Voor pixel 0 en 1: 0 = AUTO (PIR), 1 = MANUEEL ON (RGB)
+bool pixel_on[30] = {false}; // Voor alle pixels
+bool pixel_user_on[30] = {false};   // Manuele intentie (persistent)
 
-
-bool pixel_on[30] = {false};
 
 uint8_t currR[30], currG[30], currB[30];
 uint8_t targetR[30], targetG[30], targetB[30];
@@ -378,7 +388,23 @@ void setup() {
   
   // === NVS INITIALISATIE ===
   preferences.begin("room-config", false);  // read/write mode
+
+
+  // ===== BOOT: restore pixel states from NVS =====
+  for (int i = 0; i < pixels_num; i++) {
+
+    if (i < num_mov_pixels) {
+      // Pixel 0–1: mode (AUTO / ON)
+      const char* key = (i == 0) ? NVS_PIXEL_MODE_0 : NVS_PIXEL_MODE_1;
+      pixel_mode[i] = preferences.getInt(key, 0);   // default = AUTO
+    } else {
+      // Pixels 2+
+      String key = String(NVS_PIXEL_ON_BASE) + String(i);
+      pixel_on[i] = preferences.getBool(key.c_str(), false);
+    }
+  }
   
+
   // Detecteer eerste boot / lege NVS → zet defaults + melding
   bool first_boot = preferences.getString(NVS_ROOM_ID, "").isEmpty();
   
@@ -411,6 +437,14 @@ void setup() {
     preferences.putUChar(NVS_NEO_G, 255);
     preferences.putUChar(NVS_NEO_B, 255);
     preferences.putInt(NVS_PIXELS_NUM, 8);
+    // Pixel states defaults: alles uit, modes AUTO
+    for (int i = 0; i < 30; i++) {
+      String key = String(NVS_PIXEL_ON_BASE) + String(i);
+      preferences.putBool(key.c_str(), false);
+    }
+    preferences.putInt(NVS_PIXEL_MODE_0, 0);  // AUTO
+    preferences.putInt(NVS_PIXEL_MODE_1, 0);  // AUTO
+
 
     
     Serial.println("Defaults opgeslagen in NVS. Configureer via webinterface /settings");
@@ -438,6 +472,7 @@ void setup() {
   dust_enabled     = preferences.getBool(NVS_DUST_ENABLED, true);
   sun_light_enabled= preferences.getBool(NVS_SUN_ENABLED, true);
   mov2_enabled     = preferences.getBool(NVS_MOV2_ENABLED, true);
+  int num_mov_pixels = 1 + (mov2_enabled ? 1 : 0);  // 1 of 2 MOV-pixels
   tstat_enabled    = preferences.getBool(NVS_TSTAT_ENABLED, true);
   beam_enabled     = preferences.getBool(NVS_BEAM_ENABLED, true);
   neo_r = preferences.getUChar(NVS_NEO_R, 255);
@@ -460,14 +495,31 @@ void setup() {
   }
   
 
+
+  // === PIXEL STATES LADEN UIT NVS ===
+  for (int i = 0; i < pixels_num; i++) {
+    String key = String(NVS_PIXEL_USER_ON_BASE) + String(i);
+    pixel_user_on[i] = preferences.getBool(key.c_str(), false);
+    pixel_on[i] = pixel_user_on[i];   // startwaarde, auto-logica kan dit overschrijven
+  }
+
+
+
+  // pixel_mode alleen laden als i < 2 (MOV pixels)
+  pixel_mode[0] = preferences.getInt(NVS_PIXEL_MODE_0, 0);
+  if (mov2_enabled) {
+    pixel_mode[1] = preferences.getInt(NVS_PIXEL_MODE_1, 0);
+  } else {
+    pixel_mode[1] = 0;  // Forceer AUTO als MOV2 uitgeschakeld
+  }
+
+
+
   // Als aantal pixels gewijzigd is, zorg dat nieuwe pixels een default krijgen
   for (int i = pixels_num; i < 30; i++) {
     pixel_nicknames[i] = "";  // Niet gebruiken
   }
 
-
-  memset(pixel_on, 0, sizeof(pixel_on));     // Alle pixel toggles uit bij start
-  memset(pixel_mode, 0, sizeof(pixel_mode)); // Veiligheid: pixel_mode[0..1] ook resetten
 
 
   
@@ -481,6 +533,14 @@ void setup() {
 
   // Bed modus persistent maken
   bed = preferences.getBool(NVS_BED_STATE, false);  // default: UIT
+
+
+  // Laad pixel_on[] persistent uit NVS
+  for (int i = 0; i < pixels_num; i++) {
+    String key = String(NVS_PIXEL_ON_BASE) + String(i);
+    pixel_on[i] = preferences.getBool(key.c_str(), false);
+  }
+
 
   // Thuis/Uit modus persistent maken
   home_mode = preferences.getInt(NVS_HOME_MODE_STATE, home_mode_default);
@@ -518,14 +578,44 @@ void setup() {
 
 
   pixels.begin();
-  pixels.updateLength(pixels_num);  // Nu correct na laden pixels_num
-  pixels.clear();
-  pixels.show();
-  initFadeEngine();
+    pixels.updateLength(pixels_num);  // Nu correct na laden pixels_num
+    pixels.clear();
+    pixels.show();
+    initFadeEngine();
+    updateFadeInterval();
 
 
-  initFadeEngine();
-  updateFadeInterval();
+
+  // === FORCEER PIXEL STATES NA NVS LADEN (DIRECT ZICHTBAAR BIJ POWER-ON) ===
+  for (int i = 0; i < pixels_num; i++) {
+    uint8_t r = 0, g = 0, b = 0;
+    bool is_on = false;
+
+    if (i < num_mov_pixels) {  // MOV-pixel
+      if (pixel_mode[i] == 1) {  // MANUEEL ON
+        r = neo_r; g = neo_g; b = neo_b;
+        is_on = true;
+      } else {  // AUTO → uit bij start
+        r = 0; g = 0; b = 0;
+        is_on = false;
+      }
+      if (i == 0) mov1_light = is_on ? 1 : 0;
+      if (i == 1) mov2_light = is_on ? 1 : 0;
+    } else {  // Normale pixel (incl. pixel 1 als mov2 uit)
+      is_on = pixel_on[i];
+      r = is_on ? neo_r : 0;
+      g = is_on ? neo_g : 0;
+      b = is_on ? neo_b : 0;
+    }
+
+    pixels.setPixelColor(i, r, g, b);
+    currR[i] = r; currG[i] = g; currB[i] = b;
+    targetR[i] = r; targetG[i] = g; targetB[i] = b;
+    startR[i] = r; startG[i] = g; startB[i] = b;
+    fade_progress[i] = 1.0f;
+  }
+  pixels.show();  // Toon meteen de juiste staat
+
 
 
 
@@ -851,9 +941,18 @@ void setup() {
       }
       String value = pixel_on[i] ? "On" : "Off";
       String checked = pixel_on[i] ? "checked" : "";
-      String action = (i < 2) ? "/toggle_pixel_mode" + String(i) : "/toggle_pixel" + String(i);
-      html += "<tr><td class=\"label\">" + label + "</td><td class=\"value\">" + value + "</td>";
-      html += "<td class=\"control\"><form action=\"" + action + "\" method=\"get\" onsubmit=\"event.preventDefault(); submitAjax(this);\"><label class=\"switch\"><input type=\"checkbox\" " + checked + " onchange=\"submitAjax(this.form);\"><span class=\"slider-switch\"></span></label></form></td></tr>";
+
+
+      String action;
+      if (i == 0 || (i == 1 && mov2_enabled)) {
+        action = "/toggle_pixel_mode" + String(i);   // Mode-toggle alleen voor actieve MOV-pixels
+      } else {
+        action = "/toggle_pixel" + String(i);        // On/off-toggle voor alle andere (incl. pixel 1 als MOV2 uit)
+      }
+
+
+        html += "<tr><td class=\"label\">" + label + "</td><td class=\"value\">" + value + "</td>";
+        html += "<td class=\"control\"><form action=\"" + action + "\" method=\"get\" onsubmit=\"event.preventDefault(); submitAjax(this);\"><label class=\"switch\"><input type=\"checkbox\" " + checked + " onchange=\"submitAjax(this.form);\"><span class=\"slider-switch\"></span></label></form></td></tr>";
     }
 
 
@@ -979,10 +1078,30 @@ void setup() {
             td.textContent = data.w + " %";
           } else if (label.includes("Free heap")) {
             td.textContent = data.x + " %";
+          
+          
+
           } else if (label.includes("Pixel")) {
             const pixelIdx = parseInt(label.match(/\d+/)[0]);
-            td.textContent = data.ad[pixelIdx] === '1' ? "On" : "Off";
+
+            // Pixel 0: effectieve MOV1-lichtstatus
+            if (pixelIdx === 0) {
+              td.textContent = data.m ? "On" : "Off";
+            }
+            // Pixel 1: effectieve MOV2-lichtstatus
+            else if (pixelIdx === 1) {
+              td.textContent = data.n ? "On" : "Off";
+            }
+            // Pixels >= 2: persistent pixel_on[]
+            else {
+              td.textContent = data.ad.charAt(pixelIdx) === '1' ? "On" : "Off";
+            }
           }
+
+
+
+
+
         });
 
         // Update HVAC Auto toggle (checked = AUTO)
@@ -1013,35 +1132,69 @@ void setup() {
       .catch(err => console.error('Update error:', err));
   }
 
-  function submitAjax(form) {
-    const params = new URLSearchParams();
-    for (const element of form.elements) {
-      if (element.name && element.value !== undefined) {
-        params.append(element.name, element.value);
+
+
+
+
+function submitAjax(form) {
+  const params = new URLSearchParams();
+  let immediatePixelUpdate = null;
+
+  for (const element of form.elements) {
+    if (element.name && element.value !== undefined) {
+      params.append(element.name, element.value);
+
+      // Detecteer pixel toggle (manuele aan/uit)
+      if (element.name === 'pixel' && element.type === 'hidden') {
+        immediatePixelUpdate = parseInt(element.value);
+      }
+      if (element.name === 'state') {
+        immediatePixelUpdate = {
+          idx: immediatePixelUpdate,
+          state: element.value === '1'
+        };
       }
     }
-    const queryString = params.toString();
-    const url = queryString ? form.action + '?' + queryString : form.action;
-
-    fetch(url, { method: 'GET' })
-      .then(response => {
-        if (response.ok) {
-          updateValues(); // Direct alle waarden refreshen
-          const statusDiv = document.getElementById('status');
-          if (statusDiv) {
-            statusDiv.textContent = 'Bijgewerkt!';
-            setTimeout(() => { statusDiv.textContent = ''; }, 2000);
-          }
-        }
-      })
-      .catch(err => {
-        console.error('Submit error:', err);
-        const statusDiv = document.getElementById('status');
-        if (statusDiv) statusDiv.textContent = 'Fout bij bijwerken';
-      });
   }
 
+  const queryString = params.toString();
+  const url = queryString ? form.action + '?' + queryString : form.action;
 
+  // --- DIRECTE UI feedback voor Pixel labels ---
+  if (immediatePixelUpdate && immediatePixelUpdate.idx !== null) {
+    document.querySelectorAll('td.value').forEach(td => {
+      const labelTd = td.previousElementSibling;
+      if (!labelTd) return;
+
+      if (labelTd.textContent.includes('Pixel ' + immediatePixelUpdate.idx)) {
+        td.textContent = immediatePixelUpdate.state ? 'On' : 'Off';
+      }
+    });
+  }
+
+  fetch(url, { method: 'GET' })
+    .then(response => {
+      if (response.ok) {
+        updateValues(); // Backend blijft de waarheid
+        const statusDiv = document.getElementById('status');
+        if (statusDiv) {
+          statusDiv.textContent = 'Bijgewerkt!';
+          setTimeout(() => { statusDiv.textContent = ''; }, 2000);
+        }
+      }
+    })
+    .catch(err => {
+      console.error('Submit error:', err);
+      const statusDiv = document.getElementById('status');
+      if (statusDiv) statusDiv.textContent = 'Fout bij bijwerken';
+    });
+}
+
+
+
+
+
+  
   window.addEventListener('load', () => {
     updateValues();
     setInterval(updateValues, 3000);
@@ -1187,18 +1340,37 @@ void setup() {
 
 
 
-  // Toggles voor pixels 0-1 (mode AUTO/ON) en 2-7 (on/off)
-  for (int i = 0; i < pixels_num; i++) {
-    String path = (i < 2) ? "/toggle_pixel_mode" + String(i) : "/toggle_pixel" + String(i);
-    server.on(path.c_str(), HTTP_GET, [i](AsyncWebServerRequest *request) {  // Capture i
-      if (i < 2) {
-        pixel_mode[i] = 1 - pixel_mode[i];  // Toggle 0/1 (AUTO/ON)
-      } else {
-        pixel_on[i] = !pixel_on[i];  // Toggle on/off
-      }
-      request->send(200, "text/plain", "OK");
-    });
-  }
+
+// Dynamische toggles voor pixels:
+// Pixel 0  → altijd MODE (MOV1)
+// Pixel 1  → MODE alleen als mov2_enabled
+// Pixel 2+ → altijd ON/OFF
+for (int i = 0; i < pixels_num; i++) {
+
+  bool is_mode_pixel =
+    (i == 0) ||
+    (i == 1 && mov2_enabled);
+
+  String path = is_mode_pixel
+    ? "/toggle_pixel_mode" + String(i)
+    : "/toggle_pixel" + String(i);
+
+  server.on(path.c_str(), HTTP_GET, [i, is_mode_pixel](AsyncWebServerRequest *request) {
+
+    if (is_mode_pixel) {
+      pixel_mode[i] = 1 - pixel_mode[i];
+      const char* key = (i == 0) ? NVS_PIXEL_MODE_0 : NVS_PIXEL_MODE_1;
+      preferences.putInt(key, pixel_mode[i]);
+    } else {
+      pixel_on[i] = !pixel_on[i];
+      String key = String(NVS_PIXEL_ON_BASE) + String(i);
+      preferences.putBool(key.c_str(), pixel_on[i]);
+    }
+
+    request->send(200, "text/plain", "OK");
+  });
+}
+
 
 
 
@@ -1271,6 +1443,7 @@ void setup() {
       <br><br><a href="/" style="color:#336699;text-decoration:underline;">← Terug naar Status</a>
     </div>
   </div>
+
 <script>
   document.querySelectorAll('input[type=range]').forEach(slider => {
     const output = document.getElementById(slider.name + '_val');
@@ -1298,6 +1471,7 @@ void setup() {
       });
   };
 </script>
+
 </body>
 </html>
 )rawliteral";
@@ -1506,6 +1680,7 @@ server.on("/ncsi.txt", HTTP_GET, [](AsyncWebServerRequest *request) {
           <button type="button" class="reset-btn" onclick="if(confirm('Weet je zeker? Alle instellingen worden gewist!')) location.href='/factory_reset';">Factory Reset</button>
         </div>
       </form>
+
       <script>
         document.getElementById('settingsForm').onsubmit = function(e) {
           const ip = this.static_ip.value.trim();
@@ -1522,6 +1697,7 @@ server.on("/ncsi.txt", HTTP_GET, [](AsyncWebServerRequest *request) {
           return confirm('Instellingen opslaan? De controller zal rebooten.');
         };
       </script>
+
     </div>
   </div>
 </body>
@@ -1560,7 +1736,22 @@ server.on("/save_settings", HTTP_GET, [](AsyncWebServerRequest *request) {
   preferences.putBool(NVS_BEAM_ENABLED, request->hasArg("beam"));
 
   // NeoPixels
-  preferences.putInt(NVS_PIXELS_NUM, arg("pixels","8").toInt());
+
+  // NeoPixels aantal wijzigen + nieuwe pixels resetten naar uit
+  int new_pixels = arg("pixels","8").toInt();
+  new_pixels = constrain(new_pixels, 1, 30);
+  int old_pixels = pixels_num;  // huidige waarde (nog niet herladen, maar we weten het nog niet – wacht, we laden niet her, maar we rebooten toch)
+  preferences.putInt(NVS_PIXELS_NUM, new_pixels);
+
+  // Als aantal verhoogd: nieuwe pixels default uit zetten in NVS
+  if (new_pixels > old_pixels) {
+    for (int i = old_pixels; i < new_pixels; i++) {
+      String key = String(NVS_PIXEL_ON_BASE) + String(i);
+      preferences.putBool(key.c_str(), false);
+    }
+  }
+
+  // NeoPixels kleur bewaren!
   preferences.putUChar(NVS_NEO_R, arg("neo_r","255").toInt());
   preferences.putUChar(NVS_NEO_G, arg("neo_g","255").toInt());
   preferences.putUChar(NVS_NEO_B, arg("neo_b","255").toInt());
@@ -1695,8 +1886,10 @@ unsigned long last_slow = 0;
 
 
 
-void loop() {
 
+
+
+void loop() {
 
   // WiFi status change detectie voor mDNS
   wl_status_t current_status = WiFi.status();
@@ -1747,51 +1940,77 @@ void loop() {
   bool p2 = digitalRead(PIR_MOV2);
 
   if (!p1 && last1) { 
-    mov1_off_time = millis() + LIGHT_ON_DURATION; 
+    mov1_off_time = millis() + LIGHT_ON_DURATION;
     pushEvent(mov1Times, MOV_BUF_SIZE); 
   }
   if (!p2 && last2) { 
-    mov2_off_time = millis() + LIGHT_ON_DURATION; 
+    mov2_off_time = millis() + LIGHT_ON_DURATION;
     pushEvent(mov2Times, MOV_BUF_SIZE); 
   }
 
   last1 = p1; last2 = p2;
 
 
-  // NeoPixel aansturing per pixel
+
+
+
+  // NeoPixel aansturing — gesaneerd & deterministisch
+
   for (int i = 0; i < pixels_num; i++) {
-    if (i < 2) {  // Pixel 0 en 1: speciale logica
+
+    // -------- PIXEL 0 : MOV1 --------
+    if (i == 0) {
+
       if (bed == 1) {
-        // Bed AAN: alles uit, geen PIR, reset mode naar AUTO
-        setTargetColor(i, 0, 0, 0);
-        pixel_mode[i] = 0;  // Reset naar AUTO
-        pixel_on[i] = false;  // Expliciet updaten voor UI/JSON
-        if (i == 0) mov1_light = 0;
-        if (i == 1) mov2_light = 0;
-      } else {  // Bed UIT: normale logica (altijd AUTO na reset)
-        if (pixel_mode[i] == 1) {  // MANUEEL ON: gebruik RGB, altijd aan, geen timer
-          setTargetColor(i, neo_r, neo_g, neo_b);
-          pixel_on[i] = true;
-          if (i == 0) mov1_light = 1;
-          if (i == 1) mov2_light = 1;
-        } else {  // AUTO: PIR logica
-          bool dark = (light_ldr > LDR_DARK_THRESHOLD);
-          bool movement = (millis() < (i == 0 ? mov1_off_time : mov2_off_time));
-          bool l = dark && movement;
-          setTargetColor(i, 0, l ? 220 : 0, 0);  // Groen bij beweging
-          pixel_on[i] = l;
-          if (i == 0) mov1_light = l;
-          if (i == 1) mov2_light = l;
-        }
+        setTargetColor(0, 0, 0, 0);
+        mov1_light = 0;
+        pixel_on[0] = false;   // <<< SYNC UI
       }
-    } else {  // Pixels 2-7: simpel manueel ON/OFF met RGB
-      if (pixel_on[i]) {
-        setTargetColor(i, neo_r, neo_g, neo_b);
-      } else {
-        setTargetColor(i, 0, 0, 0);
+      else if (pixel_mode[0] == 1) {
+        // Manueel AAN
+        setTargetColor(0, neo_r, neo_g, neo_b);
+        mov1_light = 1;
+        pixel_on[0] = true;    // <<< SYNC UI
       }
+      else {
+        // AUTO: PIR + LDR
+        bool dark = (light_ldr > LDR_DARK_THRESHOLD);
+        bool movement = (millis() < mov1_off_time);
+        bool on = dark && movement;
+
+        setTargetColor(0, 0, on ? 220 : 0, 0);
+        mov1_light = on;
+        pixel_on[0] = on;      // <<< SYNC UI
+      }
+
+      continue;
+    }
+
+    // -------- PIXEL 1 : MOV2 of normaal --------
+    if (i == 1 && mov2_enabled && pixel_mode[1] == 0) {
+      bool dark = (light_ldr > LDR_DARK_THRESHOLD);
+      bool movement = (millis() < mov2_off_time);
+      bool on = dark && movement;
+
+      setTargetColor(1, 0, on ? 220 : 0, 0);
+      pixel_on[1] = on;        // <<< SYNC UI
+      continue;
+    }
+
+    // -------- NORMALE PIXELS --------
+    if (pixel_on[i]) {
+      setTargetColor(i, neo_r, neo_g, neo_b);
+    } else {
+      setTargetColor(i, 0, 0, 0);
     }
   }
+
+
+
+
+
+
+
 
 
 
@@ -1914,16 +2133,19 @@ void loop() {
     }
     Serial.printf("NeoPixel RGB         : %d, %d, %d\n", neo_r, neo_g, neo_b);
     Serial.printf("Dim snelheid (s)     : %d s\n", fade_duration);
-    Serial.print("Pixel modes");
+    
+
+    Serial.print("Pixel modes (MOV1");
+      if (mov2_enabled) Serial.print(",MOV2");
+      Serial.print("): ");
+      Serial.print(pixel_mode[0]);
       if (mov2_enabled) {
-        Serial.print("(MOV1,MOV2): ");
-        Serial.print(pixel_mode[0]);
         Serial.print(", ");
-        Serial.println(pixel_mode[1]);
-      } else {
-        Serial.print("(MOV1) : ");
-        Serial.println(pixel_mode[0]);
+        Serial.print(pixel_mode[1]);
       }
+     Serial.println();
+
+
     Serial.print("Pixels on (0-" + String(pixels_num-1) + ")      : ");
       for (int i = 0; i < pixels_num; i++) {
         Serial.print(pixel_on[i] ? "1" : "0");
