@@ -624,9 +624,6 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
 
-  mac_address = WiFi.macAddress();
-  Serial.println("MAC adres: " + mac_address);
-
   // === DYNAMISCHE WIFI + STATIC IP UIT NVS ===
   IPAddress local_ip;
   if (local_ip.fromString(static_ip_str)) {
@@ -648,6 +645,10 @@ void setup() {
   Serial.print("Verbinden met WiFi SSID: ");
   Serial.println(wifi_ssid);
   WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
+
+  // Haal MAC op NA WiFi.begin voor betere compatibiliteit
+  mac_address = WiFi.macAddress();
+  Serial.println("MAC adres: " + mac_address);
 
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 40) {  // 20 seconden timeout
