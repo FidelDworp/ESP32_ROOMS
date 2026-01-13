@@ -97,6 +97,7 @@ String wifi_ssid            = "netwerknaam";
 String wifi_pass            = "paswoord";
 String static_ip_str        = "192.168.xx.xx"; // Wordt omgezet naar IPAddress
 String pixel_nicknames[30];                    // Runtime Array voor pixel nicknames
+String mac_address          = "";              // Voor display in settings
 
 
 
@@ -621,6 +622,9 @@ void setup() {
 
 
   WiFi.mode(WIFI_STA);
+
+  mac_address = WiFi.macAddress();
+  Serial.println("MAC adres: " + mac_address);
 
   // === DYNAMISCHE WIFI + STATIC IP UIT NVS ===
   IPAddress local_ip;
@@ -1563,6 +1567,29 @@ server.on("/ncsi.txt", HTTP_GET, [](AsyncWebServerRequest *request) {
       <a href="/settings" class="active">Settings</a>
     </div>
     <div class="main">
+
+
+      <!-- MAC ADRES BOX -->
+      <div style="background:#e6f0ff;border:3px solid #336699;padding:20px;margin:20px;border-radius:8px;text-align:center;">
+        <h3 style="margin:0 0 10px 0;color:#336699;">📡 Controller MAC Adres</h3>
+        <div style="font-size:20px;font-weight:bold;color:#003366;font-family:monospace;background:#fff;padding:10px;border-radius:4px;display:inline-block;margin:10px 0;border:2px solid #336699;">)rawliteral" + mac_address + R"rawliteral(</div>
+        <div style="font-size:13px;color:#666;margin-top:10px;">💡 Kopieer dit MAC-adres voor DHCP-reservering in je router</div>
+      </div>
+
+      <!-- AANBEVOLEN CONFIGURATIE -->
+      <div style="background:#fffacd;border:2px solid #336699;padding:15px;margin:20px;border-radius:8px;font-size:14px;">
+        <h4 style="margin:0 0 10px 0;color:#336699;">✅ Aanbevolen: DHCP met MAC-reservering</h4>
+        <ol style="margin:10px 0;padding-left:25px;line-height:1.6;">
+          <li>Kopieer het MAC-adres hierboven</li>
+          <li>Log in op je router (meestal 192.168.1.1)</li>
+          <li>Ga naar: LAN → DHCP Server → Manual Assignment</li>
+          <li>Voeg toe: MAC-adres + gewenst IP (bijv. 192.168.1.99)</li>
+          <li>Laat hieronder het "Static IP" veld <strong>LEEG</strong></li>
+          <li>Sla op en reboot deze controller</li>
+        </ol>
+      </div>
+
+
       <div class="warning">
         OPGEPAST: Wijzigt permanente instellingen van deze controller!<br>
         Verkeerde WiFi-instellingen kunnen de controller onbereikbaar maken!<br><br>
